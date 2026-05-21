@@ -117,6 +117,7 @@ let package = Package(
                 "Models/FishSpeech/README.md",
                 "Models/Llama/README.md",
                 "Models/Marvis/README.md",
+                "Models/MossTTS/README.md",
                 "Models/PocketTTS/README.md",
                 "Models/Qwen3/README.md",
                 "Models/Qwen3TTS/README.md",
@@ -165,6 +166,7 @@ let package = Package(
             ],
             path: "Sources/MLXAudioVAD",
             exclude: [
+                "Models/SileroVAD/README.md",
                 "Models/SmartTurn/README.md",
                 "Models/Sortformer/README.md",
             ]
@@ -204,6 +206,7 @@ let package = Package(
             ],
             path: "Sources/MLXAudioSTS",
             exclude: [
+                "Models/DeepFilterNet/README.md",
                 "Models/LFMAudio/README.md",
                 "Models/SAMAudio/README.md",
             ]
