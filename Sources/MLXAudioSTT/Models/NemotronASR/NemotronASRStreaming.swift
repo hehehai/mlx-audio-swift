@@ -9,10 +9,10 @@ import MLXNN
 // (chunked_limited) encoder at the native chunk size (rightContext + 1), so the
 // streamed transcript equals `decode(...)`.
 
-private let nemoPreEncodeMelCache = 16  // >= causal receptive field of 8x dw-striding
+let nemoPreEncodeMelCache = 16  // >= causal receptive field of 8x dw-striding
 
 extension NemotronASRModel {
-    private func nemoStreamBlock(
+    func nemoStreamBlock(
         _ block: NemotronASRConformerBlock,
         _ x: MLXArray,
         attnCache: MLXArray?,
