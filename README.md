@@ -14,8 +14,8 @@ MLXAudio follows a modular design allowing you to import only what you need:
 
 - **MLXAudioCore**: Base types, protocols, and utilities
 - **MLXAudioCodecs**: Audio codec implementations (SNAC, Encodec, Vocos, Mimi, DACVAE)
-- **MLXAudioTTS**: Text-to-Speech models (Qwen3-TTS, Fish Audio S2 Pro, Soprano, VyvoTTS, Orpheus, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano)
-- **MLXAudioSTT**: Speech-to-Text models (Qwen3-ASR, Qwen3-ForcedAligner, Voxtral Realtime, Cohere Transcribe, Parakeet, GLM-ASR, Granite Speech, SenseVoice, FireRed ASR 2)
+- **MLXAudioTTS**: Text-to-Speech models (Qwen3-TTS, Fish Audio S2 Pro, Soprano, VyvoTTS, Orpheus, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano, Irodori TTS)
+- **MLXAudioSTT**: Speech-to-Text models (Qwen3-ASR, Qwen3-ForcedAligner, Voxtral Realtime, Cohere Transcribe, Parakeet, Nemotron ASR, GLM-ASR, Granite Speech, SenseVoice, FireRed ASR 2, Whisper)
 - **MLXAudioVAD**: Voice Activity Detection & Speaker Diarization (Sortformer, SmartTurn)
 - **MLXAudioLID**: Spoken language identification (MMS-LID-256, VoxLingua107 ECAPA-TDNN)
 - **MLXAudioSTS**: Speech-to-Speech, separation, and enhancement models (LFM2.5-Audio, SAM-Audio, MossFormer2-SE, DeepFilterNet)
@@ -136,6 +136,7 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 | KittenTTS | mini / micro / nano family; verified MLX ports include mini and micro | [KittenTTS README](Sources/MLXAudioTTS/Models/StyleTTS2/KittenTTS/README.md) | [mlx-community/kitten-tts-mini-0.8](https://huggingface.co/mlx-community/kitten-tts-mini-0.8) |
 | Kokoro | 82M multilingual non-autoregressive TTS; code also recognizes `kokoro-v1-*` style repos | [Kokoro README](Sources/MLXAudioTTS/Models/StyleTTS2/Kokoro/README.md) | [mlx-community/Kokoro-82M-bf16](https://huggingface.co/mlx-community/Kokoro-82M-bf16) |
 | MOSS-TTS-Nano | `moss_tts_nano` family supported by the factory; uses separate MOSS audio tokenizer assets | [MossTTSNano source](Sources/MLXAudioTTS/Models/MossTTSNano) | [mlx-community/MOSS-TTS-Nano](https://huggingface.co/mlx-community/MOSS-TTS-Nano) |
+| Irodori TTS | Japanese flow-matching TTS with VoiceDesign checkpoints | [Irodori TTS README](Sources/MLXAudioTTS/Models/IrodoriTTS/README.md) | [mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit](https://huggingface.co/mlx-community/Irodori-TTS-600M-v3-VoiceDesign-8bit) |
 
 ### STT Models
 
@@ -146,10 +147,12 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 | Voxtral Realtime | fp16, 6bit, and 4bit realtime checkpoints | [Voxtral README](Sources/MLXAudioSTT/Models/VoxtralRealtime/README.md) | [mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit](https://huggingface.co/mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit) |
 | Cohere Transcribe | Cohere Transcribe 03-2026 encoder-decoder ASR | [Cohere Transcribe README](Sources/MLXAudioSTT/Models/CohereTranscribe/README.md) | [beshkenadze/cohere-transcribe-03-2026-mlx-fp16](https://huggingface.co/beshkenadze/cohere-transcribe-03-2026-mlx-fp16) |
 | Parakeet | TDT, CTC, RNNT, and TDT-CTC variants from 110M through 1.1B | [Parakeet README](Sources/MLXAudioSTT/Models/Parakeet/README.md) | [mlx-community/parakeet-tdt-0.6b-v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) |
+| Nemotron ASR | Streaming NeMo-family ASR with cache-aware generation | [Nemotron ASR README](Sources/MLXAudioSTT/Models/NemotronASR/README.md) | [mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit](https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit) |
 | GLM-ASR | Whisper-style encoder plus GLM/LLaMA-style decoder | [GLM-ASR README](Sources/MLXAudioSTT/Models/GLMASR/README.md) | [mlx-community/GLM-ASR-Nano-2512-4bit](https://huggingface.co/mlx-community/GLM-ASR-Nano-2512-4bit) |
 | Granite Speech | ASR plus speech translation | [Granite Speech README](Sources/MLXAudioSTT/Models/GraniteSpeech/README.md) | [mlx-community/granite-4.0-1b-speech-5bit](https://huggingface.co/mlx-community/granite-4.0-1b-speech-5bit) |
 | SenseVoice | ASR plus spoken language ID, emotion recognition, and audio event detection metadata | [SenseVoice README](Sources/MLXAudioSTT/Models/SenseVoice/README.md) | [mlx-community/SenseVoiceSmall](https://huggingface.co/mlx-community/SenseVoiceSmall) |
 | FireRed ASR 2 | AED-style encoder-decoder ASR | [FireRed ASR 2 README](Sources/MLXAudioSTT/Models/FireRedASR2/README.md) | [mlx-community/FireRedASR2-AED-mlx](https://huggingface.co/mlx-community/FireRedASR2-AED-mlx) |
+| Whisper | [Whisper README](Sources/MLXAudioSTT/Models/Whisper/README.md) | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo), [mlx-community/whisper-large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo), and every other [openai/whisper-\*](https://huggingface.co/openai) / [mlx-community/whisper-\*](https://huggingface.co/mlx-community) size and `.en` variant |
 
 ### STS / Enhancement / Separation Models
 

@@ -115,6 +115,7 @@ let package = Package(
                 "Models/Chatterbox/README.md",
                 "Models/EchoTTS/README.md",
                 "Models/FishSpeech/README.md",
+                "Models/IrodoriTTS/README.md",
                 "Models/Llama/README.md",
                 "Models/Marvis/README.md",
                 "Models/MossTTS/README.md",
@@ -147,10 +148,12 @@ let package = Package(
                 "Models/FireRedASR2/README.md",
                 "Models/GLMASR/README.md",
                 "Models/GraniteSpeech/README.md",
+                "Models/NemotronASR/README.md",
                 "Models/Parakeet/README.md",
                 "Models/Qwen3ASR/README.md",
                 "Models/SenseVoice/README.md",
                 "Models/VoxtralRealtime/README.md",
+                "Models/Whisper/README.md",
             ]
         ),
 
