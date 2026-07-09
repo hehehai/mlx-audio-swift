@@ -119,6 +119,7 @@ let package = Package(
                 "Models/Llama/README.md",
                 "Models/Marvis/README.md",
                 "Models/MossTTS/README.md",
+                "Models/OmniVoice/README.md",
                 "Models/PocketTTS/README.md",
                 "Models/Qwen3/README.md",
                 "Models/Qwen3TTS/README.md",
@@ -134,6 +135,7 @@ let package = Package(
             dependencies: [
                 "MLXAudioCore",
                 "MLXAudioCodecs",
+                "MLXAudioVAD",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -148,6 +150,7 @@ let package = Package(
                 "Models/FireRedASR2/README.md",
                 "Models/GLMASR/README.md",
                 "Models/GraniteSpeech/README.md",
+                "Models/MossTranscribeDiarize/README.md",
                 "Models/NemotronASR/README.md",
                 "Models/Parakeet/README.md",
                 "Models/Qwen3ASR/README.md",

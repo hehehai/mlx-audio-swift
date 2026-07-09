@@ -13,10 +13,10 @@ A modular Swift SDK for audio processing with MLX on Apple Silicon
 MLXAudio follows a modular design allowing you to import only what you need:
 
 - **MLXAudioCore**: Base types, protocols, and utilities
-- **MLXAudioCodecs**: Audio codec implementations (SNAC, Encodec, Vocos, Mimi, DACVAE)
-- **MLXAudioTTS**: Text-to-Speech models (Qwen3-TTS, Fish Audio S2 Pro, Soprano, VyvoTTS, Orpheus, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano, Irodori TTS)
-- **MLXAudioSTT**: Speech-to-Text models (Qwen3-ASR, Qwen3-ForcedAligner, Voxtral Realtime, Cohere Transcribe, Parakeet, Nemotron ASR, GLM-ASR, Granite Speech, SenseVoice, FireRed ASR 2, Whisper)
-- **MLXAudioVAD**: Voice Activity Detection & Speaker Diarization (Sortformer, SmartTurn)
+- **MLXAudioCodecs**: Audio codec implementations (SNAC, Encodec, Vocos, Mimi, DACVAE, Descript DAC, Fish S1 DAC, S3TokenizerV2, MOSS Audio Tokenizer, Higgs Audio Tokenizer, Step-Audio-2 token-to-wav)
+- **MLXAudioTTS**: Text-to-Speech models (Qwen3-TTS, OmniVoice, Fish Audio S2 Pro, IndexTTS, Soprano, VyvoTTS, Orpheus, MOSS-TTS, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano, Irodori TTS)
+- **MLXAudioSTT**: Speech-to-Text models (Qwen3-ASR, Qwen3-ForcedAligner, Voxtral Realtime, Cohere Transcribe, Parakeet, Nemotron ASR, GLM-ASR, Granite Speech, SenseVoice, FireRed ASR 2, Whisper, Canary, Moonshine, Wav2Vec2, MMS, LASR CTC, MOSS-Transcribe-Diarize)
+- **MLXAudioVAD**: Voice Activity Detection & Speaker Diarization (Sortformer, SmartTurn, FSMN VAD, Silero VAD)
 - **MLXAudioLID**: Spoken language identification (MMS-LID-256, VoxLingua107 ECAPA-TDNN)
 - **MLXAudioSTS**: Speech-to-Speech, separation, and enhancement models (LFM2.5-Audio, SAM-Audio, MossFormer2-SE, DeepFilterNet)
 - **MLXAudioG2P**: Grapheme-to-phoneme utilities for multilingual TTS pipelines
@@ -124,11 +124,13 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 | Model family | Current support in Swift | Model README | Example / default repo |
 |--------------|--------------------------|--------------|------------------------|
 | Qwen3-TTS | Base, CustomVoice, and VoiceDesign checkpoints; 0.6B and 1.7B variants documented | [Qwen3-TTS README](Sources/MLXAudioTTS/Models/Qwen3TTS/README.md) | [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) |
+| OmniVoice | NAR diffusion over Qwen3 plus HiggsAudioV2 codec with voice cloning | [OmniVoice README](Sources/MLXAudioTTS/Models/OmniVoice/README.md) | [mlx-community/OmniVoice](https://huggingface.co/mlx-community/OmniVoice) |
 | Fish Audio S2 Pro | bf16 and 8bit checkpoints; reference voice cloning supported | [Fish Audio S2 Pro README](Sources/MLXAudioTTS/Models/FishSpeech/README.md) | [mlx-community/fish-audio-s2-pro-8bit](https://huggingface.co/mlx-community/fish-audio-s2-pro-8bit) |
 | Soprano | Compact autoregressive TTS | [Soprano README](Sources/MLXAudioTTS/Models/Soprano/README.md) | [mlx-community/Soprano-80M-bf16](https://huggingface.co/mlx-community/Soprano-80M-bf16) |
 | VyvoTTS | Qwen3-based English TTS | [VyvoTTS README](Sources/MLXAudioTTS/Models/Qwen3/README.md) | [mlx-community/VyvoTTS-EN-Beta-4bit](https://huggingface.co/mlx-community/VyvoTTS-EN-Beta-4bit) |
 | Orpheus / Llama TTS | Llama-based speech LLM with named voices | [Llama TTS README](Sources/MLXAudioTTS/Models/Llama/README.md) | [mlx-community/orpheus-3b-0.1-ft-bf16](https://huggingface.co/mlx-community/orpheus-3b-0.1-ft-bf16) |
 | MOSS-TTS | Full-size MOSS TTS family including base, dialog, and local-transformer checkpoints | [MOSS-TTS README](Sources/MLXAudioTTS/Models/MossTTS/README.md) | [OpenMOSS-Team/MOSS-TTS](https://huggingface.co/OpenMOSS-Team/MOSS-TTS), [OpenMOSS-Team/MOSS-TTSD-v1.0](https://huggingface.co/OpenMOSS-Team/MOSS-TTSD-v1.0), [OpenMOSS-Team/MOSS-TTS-Local-Transformer](https://huggingface.co/OpenMOSS-Team/MOSS-TTS-Local-Transformer) |
+| IndexTTS | IndexTTS and IndexTTS-1.5 checkpoints | — | [mlx-community/IndexTTS](https://huggingface.co/mlx-community/IndexTTS), [mlx-community/IndexTTS-1.5](https://huggingface.co/mlx-community/IndexTTS-1.5) |
 | Marvis TTS | Multi-voice conversational TTS (EN/FR/DE) | [Marvis TTS README](Sources/MLXAudioTTS/Models/Marvis/README.md) | [Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit](https://huggingface.co/Marvis-AI/marvis-tts-250m-v0.2-MLX-8bit) |
 | Pocket TTS | Lightweight CPU-friendly TTS with multiple built-in voices | [Pocket TTS README](Sources/MLXAudioTTS/Models/PocketTTS/README.md) | [mlx-community/pocket-tts](https://huggingface.co/mlx-community/pocket-tts) |
 | Chatterbox TTS | Regular and Turbo variants; multilingual regular model plus quantized Turbo checkpoints | [Chatterbox README](Sources/MLXAudioTTS/Models/Chatterbox/README.md) | [mlx-community/chatterbox-turbo-fp16](https://huggingface.co/mlx-community/chatterbox-turbo-fp16) |
@@ -144,6 +146,7 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 |--------------|--------------------------|--------------|------------------------|
 | Qwen3-ASR | 0.6B and 1.7B checkpoints across bf16 / 8bit / 6bit / 4bit | [Qwen3-ASR README](Sources/MLXAudioSTT/Models/Qwen3ASR/README.md) | [mlx-community/Qwen3-ASR-0.6B-4bit](https://huggingface.co/mlx-community/Qwen3-ASR-0.6B-4bit) |
 | Qwen3-ForcedAligner | 0.6B forced-alignment checkpoints across bf16 / 8bit / 6bit / 4bit | [Qwen3-ASR README](Sources/MLXAudioSTT/Models/Qwen3ASR/README.md) | [mlx-community/Qwen3-ForcedAligner-0.6B-4bit](https://huggingface.co/mlx-community/Qwen3-ForcedAligner-0.6B-4bit) |
+| MOSS-Transcribe-Diarize | MOSS ASR and diarization model family | [MOSS-Transcribe-Diarize README](Sources/MLXAudioSTT/Models/MossTranscribeDiarize/README.md) | [OpenMOSS-Team/MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize) |
 | Voxtral Realtime | fp16, 6bit, and 4bit realtime checkpoints | [Voxtral README](Sources/MLXAudioSTT/Models/VoxtralRealtime/README.md) | [mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit](https://huggingface.co/mlx-community/Voxtral-Mini-4B-Realtime-2602-4bit) |
 | Cohere Transcribe | Cohere Transcribe 03-2026 encoder-decoder ASR | [Cohere Transcribe README](Sources/MLXAudioSTT/Models/CohereTranscribe/README.md) | [beshkenadze/cohere-transcribe-03-2026-mlx-fp16](https://huggingface.co/beshkenadze/cohere-transcribe-03-2026-mlx-fp16) |
 | Parakeet | TDT, CTC, RNNT, and TDT-CTC variants from 110M through 1.1B | [Parakeet README](Sources/MLXAudioSTT/Models/Parakeet/README.md) | [mlx-community/parakeet-tdt-0.6b-v3](https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3) |
@@ -152,7 +155,28 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 | Granite Speech | ASR plus speech translation | [Granite Speech README](Sources/MLXAudioSTT/Models/GraniteSpeech/README.md) | [mlx-community/granite-4.0-1b-speech-5bit](https://huggingface.co/mlx-community/granite-4.0-1b-speech-5bit) |
 | SenseVoice | ASR plus spoken language ID, emotion recognition, and audio event detection metadata | [SenseVoice README](Sources/MLXAudioSTT/Models/SenseVoice/README.md) | [mlx-community/SenseVoiceSmall](https://huggingface.co/mlx-community/SenseVoiceSmall) |
 | FireRed ASR 2 | AED-style encoder-decoder ASR | [FireRed ASR 2 README](Sources/MLXAudioSTT/Models/FireRedASR2/README.md) | [mlx-community/FireRedASR2-AED-mlx](https://huggingface.co/mlx-community/FireRedASR2-AED-mlx) |
-| Whisper | [Whisper README](Sources/MLXAudioSTT/Models/Whisper/README.md) | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo), [mlx-community/whisper-large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo), and every other [openai/whisper-\*](https://huggingface.co/openai) / [mlx-community/whisper-\*](https://huggingface.co/mlx-community) size and `.en` variant |
+| Whisper | Whisper-family checkpoints from OpenAI and MLX community repos | [Whisper README](Sources/MLXAudioSTT/Models/Whisper/README.md) | [openai/whisper-large-v3-turbo](https://huggingface.co/openai/whisper-large-v3-turbo), [mlx-community/whisper-large-v3-turbo](https://huggingface.co/mlx-community/whisper-large-v3-turbo), and every other [openai/whisper-\*](https://huggingface.co/openai) / [mlx-community/whisper-\*](https://huggingface.co/mlx-community) size and `.en` variant |
+| Canary | Canary-compatible NeMo encoder-decoder checkpoints | — | [Mediform/canary-1b-v2-mlx-q8](https://huggingface.co/Mediform/canary-1b-v2-mlx-q8), Canary-compatible MLX/NeMo checkpoints |
+| Moonshine | Moonshine-compatible lightweight ASR checkpoints | — | [UsefulSensors/moonshine-tiny](https://huggingface.co/UsefulSensors/moonshine-tiny), Moonshine-compatible MLX checkpoints |
+| Wav2Vec2 CTC | Wav2Vec2 CTC-compatible ASR checkpoints | — | [facebook/wav2vec2-base-960h](https://huggingface.co/facebook/wav2vec2-base-960h), Wav2Vec2 CTC-compatible checkpoints |
+| MMS | MMS adapter checkpoints | — | [facebook/mms-1b-fl102](https://huggingface.co/facebook/mms-1b-fl102), MMS adapter checkpoints |
+| LASR CTC | LASR CTC-compatible ASR checkpoints | — | LASR CTC-compatible checkpoints |
+
+### Audio Codecs
+
+| Codec | Notes | HuggingFace Repo |
+|-------|-------|------------------|
+| SNAC | Neural audio codec with encode/decode support | [mlx-community/snac_24khz](https://huggingface.co/mlx-community/snac_24khz) |
+| Encodec | Encodec-compatible audio codec runtime | Converted Encodec-compatible MLX checkpoints |
+| Vocos | Vocoder/codec decode components | Converted Vocos-compatible MLX checkpoints |
+| Mimi | Mimi encoder/decoder codec used by speech models | Mimi-compatible MLX checkpoints |
+| DACVAE | DAC-style VAE audio codec | Converted DACVAE-compatible MLX checkpoints |
+| Descript DAC | Descript DAC-compatible audio codec | Descript DAC-compatible checkpoints |
+| Fish S1 DAC | Fish Speech S1 audio codec | Fish S1 DAC-compatible checkpoints |
+| S3TokenizerV2 | S3 acoustic tokenizer exposed in `MLXAudioCodecs` | [mlx-community/S3TokenizerV2](https://huggingface.co/mlx-community/S3TokenizerV2) |
+| MOSS Audio Tokenizer | MOSS audio tokenizer runtime shared with MOSS TTS models | [mlx-community/MOSS-Audio-Tokenizer-Nano](https://huggingface.co/mlx-community/MOSS-Audio-Tokenizer-Nano) |
+| Higgs Audio Tokenizer | Higgs acoustic tokenizer decode and acoustic encode support | [bosonai/higgs-audio-v3-tts-4b](https://huggingface.co/bosonai/higgs-audio-v3-tts-4b) bundled tokenizer weights |
+| Step-Audio-2 Token2Wav | Token-to-waveform stack for Step-Audio-2 style prompts | [mlx-community/Step-Audio-2-token2wav](https://huggingface.co/mlx-community/Step-Audio-2-token2wav) |
 
 ### STS / Enhancement / Separation Models
 
@@ -176,6 +200,8 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 |--------------|--------------------------|--------------|------------------------|
 | Sortformer | Streaming/offline speaker diarization for up to 4 speakers | [Sortformer README](Sources/MLXAudioVAD/Models/Sortformer/README.md) | [mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16](https://huggingface.co/mlx-community/diar_streaming_sortformer_4spk-v2.1-fp16) |
 | SmartTurn | Endpoint detection for conversational turn-taking | [SmartTurn README](Sources/MLXAudioVAD/Models/SmartTurn/README.md) | [mlx-community/smart-turn-v3](https://huggingface.co/mlx-community/smart-turn-v3) |
+| FSMN VAD | Frame-level voice activity detection | — | [mlx-community/fsmn-vad](https://huggingface.co/mlx-community/fsmn-vad) |
+| Silero VAD | Lightweight VAD model | [Silero VAD README](Sources/MLXAudioVAD/Models/SileroVAD/README.md) | Silero VAD-compatible MLX checkpoints |
 
 ## Features
 
