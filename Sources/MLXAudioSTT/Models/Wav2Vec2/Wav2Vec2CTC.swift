@@ -545,11 +545,13 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         guard let adapterURL = selectAdapter(from: adapters, language: normalized) else {
             throw STTError.invalidInput("No MMS adapter found for language: \(language)")
         }
+        let adapterLanguage = adapterLanguage(from: adapterURL)
+        guard activeAdapterLanguage != adapterLanguage else { return }
 
         let adapterWeights = try MLX.loadArrays(url: adapterURL)
         let sanitizedAdapter = Self.sanitize(weights: adapterWeights)
         try update(parameters: ModuleParameters.unflattened(sanitizedAdapter), verify: Module.VerifyUpdate.noUnusedKeys)
-        activeAdapterLanguage = adapterLanguage(from: adapterURL)
+        activeAdapterLanguage = adapterLanguage
         eval(self)
     }
 
