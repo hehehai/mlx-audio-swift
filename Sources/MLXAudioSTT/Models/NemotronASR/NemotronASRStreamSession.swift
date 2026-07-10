@@ -130,7 +130,7 @@ public final class NemotronASRStreamSession {
     /// Sentence-level segments with start/end times, built from the same alignment
     /// as `text`. Matches the offline path's `STTOutput.segments` so `--format srt`
     /// / `vtt` / `json` keep their timestamps when streaming.
-    public var segments: [[String: Any]] {
+    public var segments: [STTTranscriptSegment] {
         NemoAlignment.sentencesToResult(
             NemoAlignment.tokensToSentences(rnntState.results)
         ).segments
@@ -279,6 +279,7 @@ public extension NemotronASRModel {
             text: session.text.trimmingCharacters(in: .whitespacesAndNewlines),
             segments: session.segments,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .unknown : .requested,
             generationTokens: tokenCount,
             totalTokens: tokenCount,
             generationTps: totalTime > 0 ? Double(tokenCount) / totalTime : 0,

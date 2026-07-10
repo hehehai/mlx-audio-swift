@@ -294,6 +294,7 @@ public extension VoxtralRealtimeModel {
         return STTOutput(
             text: session.text.trimmingCharacters(in: .whitespacesAndNewlines),
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             generationTokens: tokenCount,
             totalTokens: tokenCount,
             generationTps: totalTime > 0 ? Double(tokenCount) / totalTime : 0,

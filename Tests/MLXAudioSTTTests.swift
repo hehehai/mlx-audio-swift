@@ -420,6 +420,7 @@ struct GLMASRModuleSetupTests {
         #expect(output.text == "Test")
         #expect(output.segments == nil)
         #expect(output.language == nil)
+        #expect(output.languageProvenance == .unknown)
         #expect(output.promptTokens == 0)
         #expect(output.generationTokens == 0)
         #expect(output.totalTokens == 0)
@@ -442,6 +443,36 @@ struct GLMASRModuleSetupTests {
         #expect(description.contains("50"))
         #expect(description.contains("25"))
         #expect(description.contains("75"))
+    }
+
+    @Test func typedTranscriptSegmentRoundTripsThroughCodable() throws {
+        let segment = STTTranscriptSegment(
+            text: "Hello",
+            startTime: 1.25,
+            endTime: 2.5,
+            speakerID: "S01",
+            language: "en",
+            confidence: 0.91,
+            emotion: "neutral",
+            event: "speech"
+        )
+
+        let encoded = try JSONEncoder().encode(segment)
+        let decoded = try JSONDecoder().decode(STTTranscriptSegment.self, from: encoded)
+
+        #expect(decoded == segment)
+        #expect(decoded.hasTiming)
+    }
+
+    @Test func sttOutputPreservesLanguageProvenance() {
+        let output = STTOutput(
+            text: "Hello",
+            language: "en",
+            languageProvenance: .detected
+        )
+
+        #expect(output.language == "en")
+        #expect(output.languageProvenance == .detected)
     }
 
     // MARK: - Config Decoding Tests
@@ -1966,11 +1997,11 @@ struct MossTranscribeDiarizeModuleSetupTests {
         let segments = MossTranscribeDiarizeModel.parseSegments(text: text, fallbackEnd: 10.0)
 
         #expect(segments.count == 2)
-        #expect(segments[0]["start"] as? Double == 0.48)
-        #expect(segments[0]["end"] as? Double == 1.66)
-        #expect(segments[0]["speaker_id"] as? String == "S01")
-        #expect(segments[0]["text"] as? String == "[S01] hello")
-        #expect(segments[1]["speaker_id"] as? String == "S02")
+        #expect(segments[0].startTime == 0.48)
+        #expect(segments[0].endTime == 1.66)
+        #expect(segments[0].speakerID == "S01")
+        #expect(segments[0].text == "hello")
+        #expect(segments[1].speakerID == "S02")
     }
 
     @Test func mossParseSegmentsAppliesChunkOffset() {
@@ -1983,9 +2014,9 @@ struct MossTranscribeDiarizeModuleSetupTests {
         )
 
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 30.48)
-        #expect(segments[0]["end"] as? Double == 31.66)
-        #expect(segments[0]["speaker_id"] as? String == "S01")
+        #expect(segments[0].startTime == 30.48)
+        #expect(segments[0].endTime == 31.66)
+        #expect(segments[0].speakerID == "S01")
     }
 
     @Test func mossOffsetTimestampTags() {
@@ -2004,8 +2035,8 @@ struct MossTranscribeDiarizeModuleSetupTests {
 
         #expect(shifted == "[30.48][S01]hello[31.66]")
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 30.48)
-        #expect(segments[0]["end"] as? Double == 31.66)
+        #expect(segments[0].startTime == 30.48)
+        #expect(segments[0].endTime == 31.66)
     }
 
     @Test func mossParseSegmentsFallback() {
@@ -2014,9 +2045,9 @@ struct MossTranscribeDiarizeModuleSetupTests {
         let segments = MossTranscribeDiarizeModel.parseSegments(text: text, fallbackEnd: 4.25)
 
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 0.0)
-        #expect(segments[0]["end"] as? Double == 4.25)
-        #expect(segments[0]["text"] as? String == text)
+        #expect(segments[0].startTime == 0.0)
+        #expect(segments[0].endTime == 4.25)
+        #expect(segments[0].text == text)
     }
 }
 
@@ -2654,10 +2685,10 @@ struct ForcedAlignResultTests {
 
         let segments = result.segments
         #expect(segments.count == 2)
-        #expect(segments[0]["text"] as? String == "Hello")
-        #expect(segments[0]["start"] as? Double == 0.0)
-        #expect(segments[0]["end"] as? Double == 0.5)
-        #expect(segments[1]["text"] as? String == "world")
+        #expect(segments[0].text == "Hello")
+        #expect(segments[0].startTime == 0.0)
+        #expect(segments[0].endTime == 0.5)
+        #expect(segments[1].text == "world")
     }
 
     @Test func forcedAlignResultEmpty() {

@@ -480,8 +480,9 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
 
         return STTOutput(
             text: text,
-            segments: [["text": text, "start": 0.0, "end": 0.0]],
+            segments: [STTTranscriptSegment(text: text)],
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .unknown : .requested,
             generationTokens: tokenIds.first?.count ?? 0,
             totalTokens: tokenIds.first?.count ?? 0,
             generationTps: Double(tokenIds.first?.count ?? 0) / max(totalTime, 0.001),

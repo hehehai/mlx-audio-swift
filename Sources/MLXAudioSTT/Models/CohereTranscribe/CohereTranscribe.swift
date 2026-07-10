@@ -383,7 +383,11 @@ public final class CohereTranscribeModel: Module, STTGenerationModel {
         generationParameters: STTGenerateParameters
     ) -> STTOutput {
         guard !chunks.isEmpty else {
-            return STTOutput(text: "", language: generationParameters.language)
+            return STTOutput(
+                text: "",
+                language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .modelDefault : .requested
+            )
         }
 
         guard chunks.count > 1 else {
@@ -430,6 +434,7 @@ public final class CohereTranscribeModel: Module, STTGenerationModel {
         return STTOutput(
             text: combinedText,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             promptTokens: promptTokens,
             generationTokens: generationTokens,
             totalTokens: totalTokens,
@@ -503,6 +508,7 @@ public final class CohereTranscribeModel: Module, STTGenerationModel {
         return STTOutput(
             text: text,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             promptTokens: context.promptLength,
             generationTokens: generated.count,
             totalTokens: context.promptLength + generated.count,
@@ -568,6 +574,7 @@ public final class CohereTranscribeModel: Module, STTGenerationModel {
                 continuation.yield(STTGeneration.result(STTOutput(
                     text: combinedText,
                     language: generationParameters.language,
+                    languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
                     promptTokens: promptTokens,
                     generationTokens: generationTokens,
                     totalTokens: totalTokens,
@@ -652,6 +659,7 @@ public final class CohereTranscribeModel: Module, STTGenerationModel {
             let output = STTOutput(
                 text: finalText,
                 language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
                 promptTokens: context.promptLength,
                 generationTokens: generated.count,
                 totalTokens: context.promptLength + generated.count,

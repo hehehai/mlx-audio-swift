@@ -59,13 +59,13 @@ public struct ForcedAlignResult: Sendable {
     }
 
     /// Segments in STTOutput-compatible format.
-    public var segments: [[String: Any]] {
+    public var segments: [STTTranscriptSegment] {
         items.map { item in
-            [
-                "text": item.text,
-                "start": item.startTime,
-                "end": item.endTime,
-            ] as [String: Any]
+            STTTranscriptSegment(
+                text: item.text,
+                startTime: item.startTime,
+                endTime: item.endTime
+            )
         }
     }
 }

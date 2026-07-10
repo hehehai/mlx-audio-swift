@@ -42,7 +42,7 @@ public final class WhisperModel: Module, STTGenerationModel {
         let chunks = chunkAudioFor30sWindows(mono)
 
         var allText: [String] = []
-        var allSegments: [[String: Any]] = []
+        var allSegments: [STTTranscriptSegment] = []
         var totalPromptTokens = 0
         var totalGenerationTokens = 0
         var detectedLanguage: String? = nil
@@ -64,11 +64,14 @@ public final class WhisperModel: Module, STTGenerationModel {
             if !trimmed.isEmpty {
                 allText.append(trimmed)
                 let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
-                allSegments.append([
-                    "text": trimmed,
-                    "start": Double(chunk.offsetSeconds),
-                    "end": endSeconds,
-                ])
+                allSegments.append(
+                    STTTranscriptSegment(
+                        text: trimmed,
+                        startTime: Double(chunk.offsetSeconds),
+                        endTime: endSeconds,
+                        language: lang
+                    )
+                )
             }
         }
 
@@ -79,6 +82,7 @@ public final class WhisperModel: Module, STTGenerationModel {
             text: combined,
             segments: allSegments.isEmpty ? nil : allSegments,
             language: detectedLanguage ?? generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .detected : .requested,
             promptTokens: totalPromptTokens,
             generationTokens: totalGenerationTokens,
             totalTokens: totalPromptTokens + totalGenerationTokens,
@@ -99,7 +103,7 @@ public final class WhisperModel: Module, STTGenerationModel {
             let chunks = chunkAudioFor30sWindows(mono)
 
             var allText: [String] = []
-            var allSegments: [[String: Any]] = []
+            var allSegments: [STTTranscriptSegment] = []
             var totalPromptTokens = 0
             var totalGenerationTokens = 0
             var detectedLanguage: String? = nil
@@ -127,11 +131,14 @@ public final class WhisperModel: Module, STTGenerationModel {
                 if !trimmed.isEmpty {
                     allText.append(trimmed)
                     let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
-                    allSegments.append([
-                        "text": trimmed,
-                        "start": Double(chunk.offsetSeconds),
-                        "end": endSeconds,
-                    ])
+                    allSegments.append(
+                        STTTranscriptSegment(
+                            text: trimmed,
+                            startTime: Double(chunk.offsetSeconds),
+                            endTime: endSeconds,
+                            language: lang
+                        )
+                    )
                 }
             }
 
@@ -142,6 +149,7 @@ public final class WhisperModel: Module, STTGenerationModel {
                 text: combined,
                 segments: allSegments.isEmpty ? nil : allSegments,
                 language: detectedLanguage ?? generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .detected : .requested,
                 promptTokens: totalPromptTokens,
                 generationTokens: totalGenerationTokens,
                 totalTokens: totalPromptTokens + totalGenerationTokens,

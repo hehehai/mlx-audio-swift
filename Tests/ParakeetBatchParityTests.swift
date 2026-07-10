@@ -738,9 +738,9 @@ private func makeStereoAudio(from mono: MLXArray) -> MLXArray {
 
 private func outputSignature(_ output: STTOutput) -> String {
     let segments = (output.segments ?? []).map { segment -> String in
-        let text = segment["text"] as? String ?? ""
-        let start = segment["start"] as? Double ?? -1
-        let end = segment["end"] as? Double ?? -1
+        let text = segment.text
+        let start = segment.startTime ?? -1
+        let end = segment.endTime ?? -1
         let formattedStart = String(format: "%.5f", start)
         let formattedEnd = String(format: "%.5f", end)
         return "\(text)@\(formattedStart)-\(formattedEnd)"
@@ -750,9 +750,9 @@ private func outputSignature(_ output: STTOutput) -> String {
 
 private func alignedResultSignature(_ result: ParakeetAlignedResult) -> String {
     let segments = (result.segments).map { segment -> String in
-        let text = segment["text"] as? String ?? ""
-        let start = segment["start"] as? Double ?? -1
-        let end = segment["end"] as? Double ?? -1
+        let text = segment.text
+        let start = segment.startTime ?? -1
+        let end = segment.endTime ?? -1
         let formattedStart = String(format: "%.5f", start)
         let formattedEnd = String(format: "%.5f", end)
         return "\(text)@\(formattedStart)-\(formattedEnd)"

@@ -422,8 +422,9 @@ public final class CanaryModel: Module, STTGenerationModel {
         let totalTime = CFAbsoluteTimeGetCurrent() - start
         return STTOutput(
             text: text,
-            segments: [["text": text, "start": 0.0, "end": 0.0]],
+            segments: [STTTranscriptSegment(text: text)],
             language: targetLanguage,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             promptTokens: promptTokens.count,
             generationTokens: generated.count,
             totalTokens: tokens.count,

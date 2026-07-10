@@ -474,13 +474,16 @@ public final class SenseVoiceModel: Module, STTGenerationModel {
 
         return STTOutput(
             text: decoded.text,
-            segments: [[
-                "text": decoded.text,
-                "language": richInfo["language"] as Any,
-                "emotion": richInfo["emotion"] as Any,
-                "event": richInfo["event"] as Any,
-            ]],
-            language: richInfo["language"]
+            segments: [
+                STTTranscriptSegment(
+                    text: decoded.text,
+                    language: richInfo["language"],
+                    emotion: richInfo["emotion"],
+                    event: richInfo["event"]
+                ),
+            ],
+            language: richInfo["language"],
+            languageProvenance: .detected
         )
     }
 

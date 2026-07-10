@@ -876,11 +876,11 @@ public final class FireRedASR2Model: Module, STTGenerationModel {
 
         return STTOutput(
             text: text,
-            segments: text.isEmpty ? nil : [[
-                "text": text,
-                "confidence": Double(roundedConfidence),
-            ]],
+            segments: text.isEmpty
+                ? nil
+                : [STTTranscriptSegment(text: text, confidence: Double(roundedConfidence))],
             language: language,
+            languageProvenance: language == nil ? .unknown : .requested,
             generationTokens: trimmedSequence.count,
             totalTokens: trimmedSequence.count,
             totalTime: CFAbsoluteTimeGetCurrent() - startTime

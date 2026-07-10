@@ -125,6 +125,7 @@ public final class NemotronASRModel: Module, STTGenerationModel {
             text: result.text,
             segments: result.segments,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .unknown : .requested,
             totalTime: elapsed
         )
     }
@@ -171,6 +172,7 @@ public final class NemotronASRModel: Module, STTGenerationModel {
                         text: finalResult.text,
                         segments: finalResult.segments,
                         language: generationParameters.language,
+                        languageProvenance: generationParameters.language == nil ? .unknown : .requested,
                         totalTime: audioDuration
                     )
                 )

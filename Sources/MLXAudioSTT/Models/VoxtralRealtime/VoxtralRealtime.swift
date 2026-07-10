@@ -113,6 +113,7 @@ public final class VoxtralRealtimeModel: Module, STTGenerationModel {
         return STTOutput(
             text: text,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             promptTokens: context.promptLength,
             generationTokens: generated.count,
             totalTokens: context.promptLength + generated.count,
@@ -179,7 +180,11 @@ public final class VoxtralRealtimeModel: Module, STTGenerationModel {
         generationParameters: STTGenerateParameters
     ) -> STTOutput {
         guard !chunks.isEmpty else {
-            return STTOutput(text: "", language: generationParameters.language)
+            return STTOutput(
+                text: "",
+                language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .modelDefault : .requested
+            )
         }
         if chunks.count <= 1 {
             // One speech region: transcribe the trimmed chunk, not the original buffer
@@ -225,6 +230,7 @@ public final class VoxtralRealtimeModel: Module, STTGenerationModel {
         return STTOutput(
             text: combinedText,
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
             promptTokens: promptTokens,
             generationTokens: generationTokens,
             totalTokens: totalTokens,
@@ -308,6 +314,7 @@ public final class VoxtralRealtimeModel: Module, STTGenerationModel {
             let output = STTOutput(
                 text: finalText,
                 language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
                 promptTokens: context.promptLength,
                 generationTokens: generated.count,
                 totalTokens: context.promptLength + generated.count,

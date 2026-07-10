@@ -916,6 +916,8 @@ public class GraniteSpeechModel: Module {
 
         return STTOutput(
             text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+            language: language,
+            languageProvenance: language == nil ? .modelDefault : .requested,
             promptTokens: promptTokenCount,
             generationTokens: generatedTokens.count,
             totalTokens: promptTokenCount + generatedTokens.count,
@@ -1010,6 +1012,8 @@ public class GraniteSpeechModel: Module {
                 let text = ctx.decode(generatedTokens)
                 continuation.yield(.result(STTOutput(
                     text: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    language: language,
+                    languageProvenance: language == nil ? .modelDefault : .requested,
                     promptTokens: promptTokenCount,
                     generationTokens: generatedTokens.count,
                     totalTokens: promptTokenCount + generatedTokens.count,

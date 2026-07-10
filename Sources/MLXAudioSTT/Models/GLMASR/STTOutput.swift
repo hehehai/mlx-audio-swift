@@ -76,16 +76,68 @@ public enum STTError: Error, LocalizedError {
 
 // MARK: - STT Output
 
+/// Describes how the language attached to an STT result was resolved.
+public enum STTLanguageProvenance: String, Codable, Hashable, Sendable {
+    /// The model detected the language from the audio.
+    case detected
+    /// The caller explicitly requested the language.
+    case requested
+    /// The model used its own default language.
+    case modelDefault
+    /// The producer did not expose enough information to determine provenance.
+    case unknown
+}
+
+/// A type-safe transcription segment shared by all STT models.
+public struct STTTranscriptSegment: Codable, Hashable, Sendable {
+    public let text: String
+    public let startTime: TimeInterval?
+    public let endTime: TimeInterval?
+    public let speakerID: String?
+    public let language: String?
+    public let confidence: Double?
+    public let emotion: String?
+    public let event: String?
+
+    public init(
+        text: String,
+        startTime: TimeInterval? = nil,
+        endTime: TimeInterval? = nil,
+        speakerID: String? = nil,
+        language: String? = nil,
+        confidence: Double? = nil,
+        emotion: String? = nil,
+        event: String? = nil
+    ) {
+        self.text = text
+        self.startTime = startTime
+        self.endTime = endTime
+        self.speakerID = speakerID
+        self.language = language
+        self.confidence = confidence
+        self.emotion = emotion
+        self.event = event
+    }
+
+    public var hasTiming: Bool {
+        guard let startTime, let endTime else { return false }
+        return startTime.isFinite && endTime.isFinite && endTime >= startTime
+    }
+}
+
 /// Output from speech-to-text transcription.
-public struct STTOutput: @unchecked Sendable {
+public struct STTOutput: Sendable {
     /// The transcribed text.
     public let text: String
 
     /// Transcription segments with timing information (optional).
-    public let segments: [[String: Any]]?
+    public let segments: [STTTranscriptSegment]?
 
     /// Detected language (optional).
     public let language: String?
+
+    /// How `language` was selected.
+    public let languageProvenance: STTLanguageProvenance
 
     /// Number of tokens in the prompt.
     public let promptTokens: Int
@@ -110,8 +162,9 @@ public struct STTOutput: @unchecked Sendable {
 
     public init(
         text: String,
-        segments: [[String: Any]]? = nil,
+        segments: [STTTranscriptSegment]? = nil,
         language: String? = nil,
+        languageProvenance: STTLanguageProvenance = .unknown,
         promptTokens: Int = 0,
         generationTokens: Int = 0,
         totalTokens: Int = 0,
@@ -123,6 +176,7 @@ public struct STTOutput: @unchecked Sendable {
         self.text = text
         self.segments = segments
         self.language = language
+        self.languageProvenance = languageProvenance
         self.promptTokens = promptTokens
         self.generationTokens = generationTokens
         self.totalTokens = totalTokens

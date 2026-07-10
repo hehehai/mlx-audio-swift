@@ -402,7 +402,7 @@ public final class MoonshineModel: Module, STTGenerationModel {
         let totalTime = CFAbsoluteTimeGetCurrent() - start
         return STTOutput(
             text: text,
-            segments: [["text": text, "start": 0.0, "end": 0.0]],
+            segments: [STTTranscriptSegment(text: text)],
             generationTokens: generated.count,
             totalTokens: tokens.count,
             generationTps: Double(generated.count) / max(totalTime, 0.001),

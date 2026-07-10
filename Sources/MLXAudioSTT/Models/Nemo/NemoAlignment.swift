@@ -49,13 +49,13 @@ public struct NemoAlignedResult: Sendable {
         self.sentences = sentences
     }
 
-    public var segments: [[String: Any]] {
+    public var segments: [STTTranscriptSegment] {
         sentences.map {
-            [
-                "text": $0.text,
-                "start": $0.start,
-                "end": $0.end,
-            ]
+            STTTranscriptSegment(
+                text: $0.text,
+                startTime: $0.start,
+                endTime: $0.end
+            )
         }
     }
 }

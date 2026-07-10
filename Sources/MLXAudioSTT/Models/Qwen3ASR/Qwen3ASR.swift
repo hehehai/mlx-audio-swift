@@ -1354,7 +1354,7 @@ public class Qwen3ASRModel: Module {
         )
 
         var allTexts: [String] = []
-        var segments: [[String: Any]] = []
+        var segments: [STTTranscriptSegment] = []
         var totalPromptTokens = 0
         var totalGenerationTokens = 0
         var remainingTokens = maxTokens
@@ -1381,15 +1381,14 @@ public class Qwen3ASRModel: Module {
             totalGenerationTokens += result.generationTokens
             remainingTokens -= result.generationTokens
 
-            var segment: [String: Any] = [
-                "text": result.text,
-                "start": Double(offsetSec),
-                "end": Double(offsetSec + actualChunkDuration),
-            ]
-            if let language = result.language {
-                segment["language"] = language
-            }
-            segments.append(segment)
+            segments.append(
+                STTTranscriptSegment(
+                    text: result.text,
+                    startTime: Double(offsetSec),
+                    endTime: Double(offsetSec + actualChunkDuration),
+                    language: result.language
+                )
+            )
 
             Memory.clearCache()
         }
@@ -1403,6 +1402,7 @@ public class Qwen3ASRModel: Module {
             text: fullText.trimmingCharacters(in: .whitespacesAndNewlines),
             segments: segments,
             language: mergedLanguage,
+            languageProvenance: forcedLanguage == nil ? .detected : .requested,
             promptTokens: totalPromptTokens,
             generationTokens: totalGenerationTokens,
             totalTokens: totalPromptTokens + totalGenerationTokens,
@@ -1586,6 +1586,7 @@ public class Qwen3ASRModel: Module {
                     let output = STTOutput(
                         text: text,
                         language: outputLanguage,
+                        languageProvenance: language == nil ? .detected : .requested,
                         promptTokens: totalPromptTokens,
                         generationTokens: totalGenerationTokens,
                         totalTokens: totalPromptTokens + totalGenerationTokens,
