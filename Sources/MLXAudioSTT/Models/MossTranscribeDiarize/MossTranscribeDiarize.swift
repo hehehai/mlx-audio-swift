@@ -781,7 +781,7 @@ extension MossTranscribeDiarizeModel {
             temperature: config.temperature,
             repetitionPenalty: defaults.repetitionPenalty,
             repetitionContextSize: defaults.repetitionContextSize,
-            prompt: nil,
+            prompt: config.prompt,
             offsetSeconds: offsetSeconds,
             onText: onText
         )

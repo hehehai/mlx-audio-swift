@@ -1853,6 +1853,12 @@ struct Qwen3ASRModuleSetupTests {
 
 struct MossTranscribeDiarizeModuleSetupTests {
 
+    @Test func streamingConfigurationCarriesPromptOverride() {
+        let config = StreamingConfig(prompt: "Transcribe using speaker labels.")
+
+        #expect(config.prompt == "Transcribe using speaker labels.")
+    }
+
     @Test func mossConfigDefaults() throws {
         let config = MossTranscribeDiarizeConfig()
 
