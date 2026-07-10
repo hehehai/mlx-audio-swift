@@ -3328,6 +3328,14 @@ struct NemotronASRTests {
         #expect(config.defaultLanguage == "auto")
     }
 
+    @Test func eventSessionMapsDelayPresetsToSupportedChunkLadder() {
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .realtime) == 160)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .agent) == 560)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .subtitle) == 1120)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .custom(ms: 300)) == 320)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .custom(ms: 800)) == 560)
+    }
+
     @Test func chunkedLimitedMaskMatchesNeMoVisibility() {
         guard mlxRuntimeEnabled else {
             print("Skipping Nemotron ASR MLX runtime test. Set MLXAUDIO_ENABLE_MLX_RUNTIME_TESTS=1 to enable.")
