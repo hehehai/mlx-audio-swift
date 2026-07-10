@@ -734,6 +734,7 @@ struct Wav2Vec2CTCSTTTests {
             vocabularies: [
                 "eng": [1: "h", 2: "|", 3: "i"],
                 "fra": [1: "s", 2: "|", 3: "a"],
+                "cmn-script_simplified": [1: "你", 2: "|", 3: "好"],
             ]
         )
 
@@ -743,6 +744,8 @@ struct Wav2Vec2CTCSTTTests {
         try! model.selectLanguage("fr")
         #expect(model.activeAdapterLanguage == nil)
         #expect(model.decode(tokens: [1, 2, 3]) == "s a")
+        try! model.selectLanguage("cmn")
+        #expect(model.decode(tokens: [1, 2, 3]) == "你 好")
     }
 
     @Test func languageSelectionRejectsMissingVocabulary() {

@@ -515,10 +515,10 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         guard let language, !language.isEmpty else {
             return defaultVocabulary
         }
-        let key = language.lowercased()
-        return vocabularies[key]
-            ?? vocabularies[Self.iso3LanguageAlias(key)]
-            ?? defaultVocabulary
+        guard let key = Self.resolvedLanguageKey(language, availableKeys: Array(vocabularies.keys)) else {
+            return defaultVocabulary
+        }
+        return vocabularies[key] ?? defaultVocabulary
     }
 
     /// Loads the matching MMS language adapter and selects its vocabulary.
@@ -529,7 +529,8 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
             throw STTError.invalidInput("Wav2Vec2/MMS language must not be empty")
         }
 
-        if let vocabulary = vocabularies[normalized] ?? vocabularies[Self.iso3LanguageAlias(normalized)] {
+        if let key = Self.resolvedLanguageKey(normalized, availableKeys: Array(vocabularies.keys)),
+           let vocabulary = vocabularies[key] {
             defaultVocabulary = vocabulary
         } else if !vocabularies.isEmpty {
             throw STTError.invalidInput("No Wav2Vec2/MMS vocabulary found for language: \(language)")
@@ -662,6 +663,21 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
             return language
         }
     }
+
+    fileprivate static func resolvedLanguageKey(_ language: String, availableKeys: [String]) -> String? {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let candidates = [normalized, iso3LanguageAlias(normalized)]
+        for candidate in candidates {
+            if availableKeys.contains(candidate) {
+                return candidate
+            }
+            let scriptMatches = availableKeys.filter { $0.hasPrefix("\(candidate)-script_") }
+            if scriptMatches.count == 1 {
+                return scriptMatches[0]
+            }
+        }
+        return nil
+    }
 }
 
 private func sanitizeWav2Vec2CTCWeights(_ weights: [String: MLXArray], includeLMHead: Bool) -> [String: MLXArray] {
@@ -757,18 +773,10 @@ private func adapterLanguage(from url: URL) -> String {
 
 private func selectAdapter(from adapters: [URL], language: String?) -> URL? {
     guard !adapters.isEmpty else { return nil }
-
-    let languageKeys: [String]
-    if let language, !language.isEmpty {
-        let lower = language.lowercased()
-        languageKeys = [lower, Wav2Vec2CTCModel.iso3LanguageAlias(lower)]
-    } else {
-        languageKeys = ["eng", "en"]
-    }
-    for key in languageKeys {
-        if let match = adapters.first(where: { $0.lastPathComponent == "adapter.\(key).safetensors" }) {
-            return match
-        }
+    let requestedLanguage = (language?.isEmpty == false ? language : nil) ?? "eng"
+    let availableLanguages = adapters.map(adapterLanguage(from:))
+    if let key = Wav2Vec2CTCModel.resolvedLanguageKey(requestedLanguage, availableKeys: availableLanguages) {
+        return adapters.first(where: { adapterLanguage(from: $0) == key })
     }
     return language == nil ? adapters.first : nil
 }
@@ -794,11 +802,10 @@ private func loadVocabularies(from modelDir: URL) throws -> [String: [Int: Strin
 }
 
 private func selectDefaultVocabulary(from store: [String: [Int: String]], language: String?) -> [Int: String] {
-    if let language, !language.isEmpty {
-        let lower = language.lowercased()
-        if let vocab = store[lower] ?? store[Wav2Vec2CTCModel.iso3LanguageAlias(lower)] {
-            return vocab
-        }
+    if let language, !language.isEmpty,
+       let key = Wav2Vec2CTCModel.resolvedLanguageKey(language, availableKeys: Array(store.keys)),
+       let vocabulary = store[key] {
+        return vocabulary
     }
     return store["eng"] ?? store["en"] ?? store["default"] ?? store.values.first ?? [:]
 }
