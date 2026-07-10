@@ -468,11 +468,11 @@ struct GLMASRModuleSetupTests {
         let output = STTOutput(
             text: "Hello",
             language: "en",
-            languageProvenance: .detected
+            languageProvenance: .outputTarget
         )
 
         #expect(output.language == "en")
-        #expect(output.languageProvenance == .detected)
+        #expect(output.languageProvenance == .outputTarget)
     }
 
     // MARK: - Config Decoding Tests

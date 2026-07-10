@@ -82,6 +82,8 @@ public enum STTLanguageProvenance: String, Codable, Hashable, Sendable {
     case detected
     /// The caller explicitly requested the language.
     case requested
+    /// The language describes translated output rather than the spoken input.
+    case outputTarget
     /// The model used its own default language.
     case modelDefault
     /// The producer did not expose enough information to determine provenance.

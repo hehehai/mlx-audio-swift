@@ -420,11 +420,18 @@ public final class CanaryModel: Module, STTGenerationModel {
 
         let text = decode(tokens: generated).trimmingCharacters(in: .whitespacesAndNewlines)
         let totalTime = CFAbsoluteTimeGetCurrent() - start
+        let languageProvenance: STTLanguageProvenance = if targetLanguage != sourceLanguage {
+            .outputTarget
+        } else if generationParameters.language == nil {
+            .modelDefault
+        } else {
+            .requested
+        }
         return STTOutput(
             text: text,
             segments: [STTTranscriptSegment(text: text)],
             language: targetLanguage,
-            languageProvenance: generationParameters.language == nil ? .modelDefault : .requested,
+            languageProvenance: languageProvenance,
             promptTokens: promptTokens.count,
             generationTokens: generated.count,
             totalTokens: tokens.count,
