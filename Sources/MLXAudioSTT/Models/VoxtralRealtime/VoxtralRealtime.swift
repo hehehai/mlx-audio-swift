@@ -146,11 +146,46 @@ public final class VoxtralRealtimeModel: Module, STTGenerationModel {
             }
             return generate(audio: audio1D, generationParameters: generationParameters)
         }
+        return generateSegmented(
+            chunks: chunks,
+            fallbackAudio: audio1D,
+            generationParameters: generationParameters
+        )
+    }
+
+    /// Runs VAD segmentation without silently falling back when VAD fails.
+    public func generateWithVAD(
+        audio: MLXArray,
+        generationParameters: STTGenerateParameters,
+        vad: (model: SileroVAD, config: SpeechSegmentConfig)
+    ) throws -> STTOutput {
+        let audio1D = audio.ndim > 1 ? audio.mean(axis: -1) : audio
+        let chunks = try segmentSpeech(
+            audio: audio1D,
+            sampleRate: VoxtralRealtimeConstants.sampleRate,
+            vadModel: vad.model,
+            config: vad.config
+        )
+        return generateSegmented(
+            chunks: chunks,
+            fallbackAudio: audio1D,
+            generationParameters: generationParameters
+        )
+    }
+
+    private func generateSegmented(
+        chunks: [(MLXArray, Float)],
+        fallbackAudio: MLXArray,
+        generationParameters: STTGenerateParameters
+    ) -> STTOutput {
+        guard !chunks.isEmpty else {
+            return STTOutput(text: "", language: generationParameters.language)
+        }
         if chunks.count <= 1 {
             // One speech region: transcribe the trimmed chunk, not the original buffer
             // (keeps the VAD's leading/trailing-silence removal). `chunks` is never empty,
             // but fall back to `audio1D` defensively.
-            return generate(audio: chunks.first?.0 ?? audio1D, generationParameters: generationParameters)
+            return generate(audio: chunks.first?.0 ?? fallbackAudio, generationParameters: generationParameters)
         }
 
         var outputs: [STTOutput] = []

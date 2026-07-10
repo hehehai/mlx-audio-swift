@@ -325,6 +325,19 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
         audio: MLXArray,
         generationParameters: STTGenerateParameters
     ) -> AsyncThrowingStream<STTGeneration, Error> {
+        generateStream(
+            audio: audio,
+            generationParameters: generationParameters,
+            prompt: nil
+        )
+    }
+
+    /// Generates a cancellable MOSS transcription stream with an optional task prompt.
+    public func generateStream(
+        audio: MLXArray,
+        generationParameters: STTGenerateParameters,
+        prompt: String?
+    ) -> AsyncThrowingStream<STTGeneration, Error> {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
         return AsyncThrowingStream { continuation in
@@ -354,7 +367,7 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
                             temperature: generationParameters.temperature,
                             repetitionPenalty: generationParameters.repetitionPenalty,
                             repetitionContextSize: generationParameters.repetitionContextSize,
-                            prompt: nil,
+                            prompt: prompt,
                             offsetSeconds: Double(offsetSeconds)
                         ) { text in
                             guard !text.isEmpty else { return }

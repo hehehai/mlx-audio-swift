@@ -1879,6 +1879,12 @@ struct Qwen3ASRModuleSetupTests {
 
 struct MossTranscribeDiarizeModuleSetupTests {
 
+    @Test func streamingFailurePreservesLocalizedMessage() {
+        let failure = StreamingFailure(message: "decode failed")
+        #expect(failure.localizedDescription == "decode failed")
+        #expect(failure == StreamingFailure(message: "decode failed"))
+    }
+
     @Test func streamingConfigurationCarriesPromptOverride() {
         let config = StreamingConfig(prompt: "Transcribe using speaker labels.")
 

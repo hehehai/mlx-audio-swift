@@ -112,8 +112,21 @@ public enum TranscriptionEvent: Sendable {
     case displayUpdate(confirmedText: String, provisionalText: String)
     /// Performance statistics
     case stats(StreamingStats)
+    /// Session terminated because inference failed
+    case failed(StreamingFailure)
     /// Session has ended with final text
     case ended(fullText: String)
+}
+
+/// A sendable failure value emitted by a streaming inference session.
+public struct StreamingFailure: Error, Sendable, Equatable, LocalizedError {
+    public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+
+    public var errorDescription: String? { message }
 }
 
 // MARK: - Streaming Stats

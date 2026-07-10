@@ -294,16 +294,18 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
         let sharedState = self.shared
         let audioState = self.audioState
 
-        decodeTask = Task.detached {
+        decodeTask = Task.detached { [weak self] in
             defer {
                 audioState.withLock { $0.isDecoding = false }
             }
 
-            Self.runDecodePass(
+            if let failure = Self.runDecodePass(
                 params: params,
                 continuation: continuation,
                 sharedState: sharedState
-            )
+            ) {
+                self?.fail(failure)
+            }
         }
     }
 
@@ -311,8 +313,8 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
         params: MossDecodePassParams,
         continuation: AsyncStream<TranscriptionEvent>.Continuation?,
         sharedState: OSAllocatedUnfairLock<MossStreamingSharedState>
-    ) {
-        if Task.isCancelled { return }
+    ) -> StreamingFailure? {
+        if Task.isCancelled { return nil }
 
         let decodeStart = Date()
         let output: STTOutput
@@ -350,10 +352,11 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 onText: onText
             )
         } catch {
-            return
+            guard !Task.isCancelled, !(error is CancellationError) else { return nil }
+            return StreamingFailure(message: error.localizedDescription)
         }
 
-        if Task.isCancelled { return }
+        if Task.isCancelled { return nil }
 
         let text = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
         switch params.kind {
@@ -389,6 +392,19 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
             realTimeFactor: decodeTime / max(currentWindowSeconds, 0.001),
             peakMemoryGB: output.peakMemoryUsage
         )))
+        return nil
+    }
+
+    private func fail(_ failure: StreamingFailure) {
+        let failedContinuation: AsyncStream<TranscriptionEvent>.Continuation? = sessionLock.withLock { _ in
+            guard let activeContinuation = continuation else { return nil }
+            isActive = false
+            continuation = nil
+            return activeContinuation
+        }
+        guard let failedContinuation else { return }
+        failedContinuation.yield(.failed(failure))
+        failedContinuation.finish()
     }
 
     private static func yieldMossDisplayUpdate(
@@ -498,11 +514,14 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 totalSamples: totalSamples,
                 encodedWindowCount: encodedWindowCount + 1
             )
-            Self.runDecodePass(
+            if let failure = Self.runDecodePass(
                 params: params,
                 continuation: continuation,
                 sharedState: shared
-            )
+            ) {
+                fail(failure)
+                return
+            }
         }
 
         let finalText = shared.withLock { state in

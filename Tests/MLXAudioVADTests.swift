@@ -944,6 +944,16 @@ struct SmartTurnNetworkTests {
 
 struct SileroVADConfigTests {
 
+    @Test func speechSegmentConfigPreservesLegacyNoSpeechBehaviorByDefault() {
+        let config = SpeechSegmentConfig()
+        #expect(config.noSpeechPolicy == .useFullAudio)
+    }
+
+    @Test func speechSegmentConfigCanSuppressNoSpeechAudio() {
+        let config = SpeechSegmentConfig(noSpeechPolicy: .returnEmpty)
+        #expect(config.noSpeechPolicy == .returnEmpty)
+    }
+
     @Test func branchDefaults16k() {
         let c = SileroVADBranchConfig.default16k
         #expect(c.sampleRate == 16000)
