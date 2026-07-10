@@ -1452,8 +1452,9 @@ public class Qwen3ASRModel: Module {
                     var remainingTokens = maxTokens
                     var allGeneratedTokens: [Int] = []
                     var resolvedLanguage = language
+                    var segments: [STTTranscriptSegment] = []
 
-                    for (chunkAudio, _) in chunks {
+                    for (chunkAudio, offsetSeconds) in chunks {
                         if remainingTokens <= 0 { break }
                         try Task.checkCancellation()
 
@@ -1555,6 +1556,22 @@ public class Qwen3ASRModel: Module {
                         totalGenerationTokens += chunkTokens.count
                         remainingTokens -= chunkTokens.count
 
+                        let decodedChunk = tokenizer.decode(tokens: chunkTokens)
+                        let parsedChunk = model.extractLanguage(from: decodedChunk)
+                        let chunkText = parsedChunk.language == nil
+                            ? decodedChunk.trimmingCharacters(in: .whitespacesAndNewlines)
+                            : parsedChunk.text
+                        if !chunkText.isEmpty {
+                            segments.append(
+                                STTTranscriptSegment(
+                                    text: chunkText,
+                                    startTime: Double(offsetSeconds),
+                                    endTime: Double(offsetSeconds) + Double(chunkAudio.dim(0)) / Double(model.sampleRate),
+                                    language: parsedChunk.language ?? resolvedLanguage
+                                )
+                            )
+                        }
+
                         if resolvedLanguage == nil && !languagePrefixBuffer.isEmpty {
                             continuation.yield(.token(languagePrefixBuffer))
                         }
@@ -1585,6 +1602,7 @@ public class Qwen3ASRModel: Module {
                     let text = language == nil ? parsed.text : decodedText.trimmingCharacters(in: .whitespacesAndNewlines)
                     let output = STTOutput(
                         text: text,
+                        segments: segments.isEmpty ? nil : segments,
                         language: outputLanguage,
                         languageProvenance: language == nil ? .detected : .requested,
                         promptTokens: totalPromptTokens,

@@ -1802,6 +1802,19 @@ struct Qwen3ASRModuleSetupTests {
         #expect(merged == "Chinese,English")
     }
 
+    @Test func typedQwenSegmentCarriesTimelineAndDetectedLanguage() {
+        let segment = STTTranscriptSegment(
+            text: "hello",
+            startTime: 2,
+            endTime: 4.5,
+            language: "English"
+        )
+
+        #expect(segment.hasTiming)
+        #expect(segment.language == "English")
+        #expect(segment.endTime == 4.5)
+    }
+
     @Test func qwen3ForcedAlignerModelConstruction() {
         let config = Qwen3ASRConfig(
             audioConfig: Qwen3AudioEncoderConfig(
