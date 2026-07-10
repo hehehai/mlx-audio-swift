@@ -667,7 +667,7 @@ private extension CohereTranscribeModel {
 
         let promptIds = tokenizer.buildPromptTokens(
             language: generationParameters.language ?? "en",
-            usePunctuation: true,
+            usePunctuation: generationParameters.usePunctuation ?? true,
             useTimestamps: false
         )
         
@@ -748,6 +748,8 @@ private extension CohereTranscribeModel {
             topK: generationParameters.topK,
             verbose: generationParameters.verbose,
             language: generationParameters.language,
+            targetLanguage: generationParameters.targetLanguage,
+            usePunctuation: generationParameters.usePunctuation,
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration
         )
@@ -769,6 +771,8 @@ extension CohereTranscribeModel {
             topK: defaultParameters.topK,
             verbose: false,
             language: language?.isEmpty == false ? language : defaultParameters.language,
+            targetLanguage: defaultParameters.targetLanguage,
+            usePunctuation: config.usePunctuation ?? defaultParameters.usePunctuation,
             chunkDuration: defaultParameters.chunkDuration,
             minChunkDuration: defaultParameters.minChunkDuration,
             repetitionPenalty: defaultParameters.repetitionPenalty,

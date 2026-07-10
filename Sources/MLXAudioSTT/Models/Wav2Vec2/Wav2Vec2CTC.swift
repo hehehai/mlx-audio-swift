@@ -433,6 +433,8 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
     public let config: Wav2Vec2STTConfig
     public var vocabularies: [String: [Int: String]]
     public var defaultVocabulary: [Int: String]
+    public private(set) var activeAdapterLanguage: String?
+    private var modelDirectory: URL?
 
     @ModuleInfo public var wav2vec2: Wav2Vec2STTModel
     @ModuleInfo(key: "lm_head") public var lmHead: Linear
@@ -449,6 +451,8 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         self.config = config
         self.defaultVocabulary = vocabulary
         self.vocabularies = vocabularies
+        self.activeAdapterLanguage = nil
+        self.modelDirectory = nil
         _wav2vec2.wrappedValue = Wav2Vec2STTModel(config: config)
         _lmHead.wrappedValue = Linear(config.hiddenSize, config.vocabSize)
         super.init()
@@ -517,6 +521,38 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
             ?? defaultVocabulary
     }
 
+    /// Loads the matching MMS language adapter and selects its vocabulary.
+    /// Plain Wav2Vec2 checkpoints without adapters only update the vocabulary.
+    public func selectLanguage(_ language: String) throws {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            throw STTError.invalidInput("Wav2Vec2/MMS language must not be empty")
+        }
+
+        if let vocabulary = vocabularies[normalized] ?? vocabularies[Self.iso3LanguageAlias(normalized)] {
+            defaultVocabulary = vocabulary
+        } else if !vocabularies.isEmpty {
+            throw STTError.invalidInput("No Wav2Vec2/MMS vocabulary found for language: \(language)")
+        }
+
+        guard let modelDirectory else {
+            return
+        }
+        let adapters = adapterURLs(in: modelDirectory)
+        guard !adapters.isEmpty else {
+            return
+        }
+        guard let adapterURL = selectAdapter(from: adapters, language: normalized) else {
+            throw STTError.invalidInput("No MMS adapter found for language: \(language)")
+        }
+
+        let adapterWeights = try MLX.loadArrays(url: adapterURL)
+        let sanitizedAdapter = Self.sanitize(weights: adapterWeights)
+        try update(parameters: ModuleParameters.unflattened(sanitizedAdapter), verify: Module.VerifyUpdate.noUnusedKeys)
+        activeAdapterLanguage = adapterLanguage(from: adapterURL)
+        eval(self)
+    }
+
     public static func greedyCTCTokens(logits: MLXArray, blankTokenId: Int = 0) -> [[Int]] {
         let predictions = logits.argMax(axis: -1).asType(.int32)
         eval(predictions)
@@ -582,15 +618,17 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
             vocabulary: selectDefaultVocabulary(from: vocabStore, language: language),
             vocabularies: vocabStore
         )
+        model.modelDirectory = modelDir
 
         let weights = try loadSafetensorWeights(from: modelDir, includeAdapters: false)
         let sanitized = sanitize(weights: weights)
         try model.update(parameters: ModuleParameters.unflattened(sanitized), verify: Module.VerifyUpdate.noUnusedKeys)
 
-        if let adapterURL = selectAdapter(in: modelDir, language: language) {
+        if let adapterURL = selectAdapter(from: adapterURLs(in: modelDir), language: language) {
             let adapterWeights = try MLX.loadArrays(url: adapterURL)
             let sanitizedAdapter = sanitize(weights: adapterWeights)
             try model.update(parameters: ModuleParameters.unflattened(sanitizedAdapter), verify: Module.VerifyUpdate.noUnusedKeys)
+            model.activeAdapterLanguage = adapterLanguage(from: adapterURL)
         }
 
         model.train(false)
@@ -704,11 +742,18 @@ private func loadSafetensorWeights(from modelDir: URL, includeAdapters: Bool) th
     return weights
 }
 
-private func selectAdapter(in modelDir: URL, language: String?) -> URL? {
+private func adapterURLs(in modelDir: URL) -> [URL] {
     let files = (try? FileManager.default.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)) ?? []
-    let adapters = files
+    return files
         .filter { $0.pathExtension == "safetensors" && $0.lastPathComponent.hasPrefix("adapter.") }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
+private func adapterLanguage(from url: URL) -> String {
+    url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "adapter.", with: "")
+}
+
+private func selectAdapter(from adapters: [URL], language: String?) -> URL? {
     guard !adapters.isEmpty else { return nil }
 
     let languageKeys: [String]
@@ -723,7 +768,7 @@ private func selectAdapter(in modelDir: URL, language: String?) -> URL? {
             return match
         }
     }
-    return adapters.first
+    return language == nil ? adapters.first : nil
 }
 
 private func loadVocabularies(from modelDir: URL) throws -> [String: [Int: String]] {

@@ -7,6 +7,8 @@ public struct STTGenerateParameters: Sendable {
     public let topK: Int
     public let verbose: Bool
     public let language: String?
+    public let targetLanguage: String?
+    public let usePunctuation: Bool?
     public let chunkDuration: Float
     public let minChunkDuration: Float
     public let repetitionPenalty: Float
@@ -19,6 +21,8 @@ public struct STTGenerateParameters: Sendable {
         topK: Int = 0,
         verbose: Bool = false,
         language: String? = nil,
+        targetLanguage: String? = nil,
+        usePunctuation: Bool? = nil,
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
@@ -30,6 +34,8 @@ public struct STTGenerateParameters: Sendable {
         self.topK = topK
         self.verbose = verbose
         self.language = language
+        self.targetLanguage = targetLanguage
+        self.usePunctuation = usePunctuation
         self.chunkDuration = chunkDuration
         self.minChunkDuration = minChunkDuration
         self.repetitionPenalty = repetitionPenalty

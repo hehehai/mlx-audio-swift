@@ -62,6 +62,8 @@ public struct StreamingConfig: Sendable {
     public var finalizeCompletedWindows: Bool
     /// Optional model prompt override. Models that do not support prompting ignore it.
     public var prompt: String?
+    /// Optional punctuation and capitalization override. Models without task-token support ignore it.
+    public var usePunctuation: Bool?
 
     public init(
         decodeIntervalSeconds: Double = 1.0,
@@ -77,7 +79,8 @@ public struct StreamingConfig: Sendable {
         boundaryMinAgreementPasses: Int = 3,
         maxDecodeWindows: Int = 1,
         finalizeCompletedWindows: Bool = true,
-        prompt: String? = nil
+        prompt: String? = nil,
+        usePunctuation: Bool? = nil
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
         self.boundaryDecodeIntervalSeconds = boundaryDecodeIntervalSeconds
@@ -93,6 +96,7 @@ public struct StreamingConfig: Sendable {
         self.maxDecodeWindows = maxDecodeWindows
         self.finalizeCompletedWindows = finalizeCompletedWindows
         self.prompt = prompt
+        self.usePunctuation = usePunctuation
     }
 }
 

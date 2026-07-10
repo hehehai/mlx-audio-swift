@@ -739,6 +739,21 @@ struct Wav2Vec2CTCSTTTests {
 
         #expect(model.decode(tokens: [1, 2, 3], language: "en") == "h i")
         #expect(model.decode(tokens: [1, 2, 3], language: "fra") == "s a")
+
+        try! model.selectLanguage("fr")
+        #expect(model.activeAdapterLanguage == nil)
+        #expect(model.decode(tokens: [1, 2, 3]) == "s a")
+    }
+
+    @Test func languageSelectionRejectsMissingVocabulary() {
+        let model = Wav2Vec2CTCModel(
+            config: Wav2Vec2STTConfig(vocabSize: 4),
+            vocabularies: ["eng": [1: "h"]]
+        )
+
+        #expect(throws: (any Error).self) {
+            try model.selectLanguage("jpn")
+        }
     }
 
     @Test func tinyForwardProducesCTCLogits() {
@@ -1031,6 +1046,7 @@ struct CanarySTTTests {
         <|en|> 13
         <|de|> 14
         <|pnc|> 15
+        <|nopnc|> 20
         <|noitn|> 16
         <|notimestamp|> 17
         <|nodiarize|> 18
@@ -1043,8 +1059,15 @@ struct CanarySTTTests {
         let loadedTokenizer = try CanaryTokenizer.fromModelDirectory(dir, config: config)
         let tokenizer = try #require(loadedTokenizer)
         let prompt = tokenizer.buildPromptTokens(config: config, sourceLanguage: "en", targetLanguage: "de")
+        let noPunctuationPrompt = tokenizer.buildPromptTokens(
+            config: config,
+            sourceLanguage: "de",
+            targetLanguage: "en",
+            usePunctuationAndCapitalization: false
+        )
 
         #expect(prompt == [10, 11, 12, 13, 14, 15, 16, 17, 18])
+        #expect(noPunctuationPrompt == [10, 11, 12, 14, 13, 20, 16, 17, 18])
         #expect(tokenizer.eosTokenId(config: config) == 19)
         #expect(tokenizer.decode([5]) == "Hallo")
     }
