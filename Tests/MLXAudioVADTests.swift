@@ -983,6 +983,7 @@ struct SileroVADConfigTests {
         #expect(config.threshold == 0.5)
         #expect(config.branch16k.chunkSize == 512)
         #expect(config.branch8k.chunkSize == 256)
+        #expect(config.supports8k)
     }
 
     @Test func modelConfigDecodesUpstreamFormat() throws {
@@ -1010,6 +1011,7 @@ struct SileroVADConfigTests {
         #expect(config.minSpeechDurationMs == 250)
         #expect(config.branch16k.cutoff == 129)
         #expect(config.branch8k.chunkSize == 256)
+        #expect(!config.supports8k)
     }
 }
 
@@ -1028,6 +1030,56 @@ struct SileroVADModelTests {
         let st = try model.initialState(sampleRate: 8000)
         #expect(st.sampleRate == 8000)
         #expect(st.context.shape == [1, 32])
+    }
+
+    @Test func v6ConfigRejects8kState() throws {
+        let configData = #"""
+        {
+          "branch_16k": {
+            "sample_rate": 16000,
+            "filter_length": 256,
+            "hop_length": 128,
+            "pad": 64,
+            "cutoff": 129,
+            "context_size": 64,
+            "chunk_size": 512
+          }
+        }
+        """#.data(using: .utf8)!
+        let config = try JSONDecoder().decode(SileroVADConfig.self, from: configData)
+        let model = SileroVAD(config)
+
+        #expect(!config.supports8k)
+        #expect(throws: SileroVADError.self) {
+            _ = try model.initialState(sampleRate: 8000)
+        }
+    }
+
+    @Test func loads16kOnlyV6Checkpoint() throws {
+        let fixtureDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("silero-v6-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: fixtureDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fixtureDirectory) }
+
+        let config = SileroVADConfig(supports8k: false)
+        let configData = try JSONEncoder().encode(config)
+        try configData.write(to: fixtureDirectory.appendingPathComponent("config.json"))
+
+        let seedModel = SileroVAD(config)
+        let weights: [String: MLXArray] = Dictionary(
+            uniqueKeysWithValues: seedModel.parameters().flattened().compactMap { key, value -> (String, MLXArray)? in
+                guard key.hasPrefix("branch16k.") else { return nil }
+                return ("vad_16k." + String(key.dropFirst("branch16k.".count)), value)
+            }
+        )
+        try MLX.save(arrays: weights, url: fixtureDirectory.appendingPathComponent("model.safetensors"))
+
+        let loaded = try SileroVAD.fromModelDirectory(fixtureDirectory)
+        let state = try loaded.initialState(sampleRate: 16000)
+        #expect(state.context.shape == [1, 64])
+        #expect(throws: SileroVADError.self) {
+            _ = try loaded.initialState(sampleRate: 8000)
+        }
     }
 
     @Test func unsupportedSampleRateThrows() {

@@ -9,7 +9,7 @@ Swift / MLX port of the Silero voice activity detector (`silero_vad`).
 | Silero VAD v5 | [`mlx-community/silero-vad`](https://huggingface.co/mlx-community/silero-vad) |
 | Silero VAD v6 | [`mlx-community/silero-vad-v6`](https://huggingface.co/mlx-community/silero-vad-v6) |
 
-Both ship the same `vad_16k.*` / `vad_8k.*` weight layout — the loader works for either.
+The v5 checkpoint contains both `vad_16k.*` and `vad_8k.*` weights. The v6 checkpoint contains only `vad_16k.*`, so v6 accepts 16 kHz audio only.
 
 ## Usage
 
@@ -17,7 +17,7 @@ Both ship the same `vad_16k.*` / `vad_8k.*` weight layout — the loader works f
 import MLXAudioVAD
 import MLXAudioCore
 
-let model = try await SileroVAD.fromPretrained("mlx-community/silero-vad")
+let model = try await SileroVAD.fromPretrained("mlx-community/silero-vad-v6")
 
 let (sampleRate, audio) = try loadAudioArray(from: audioURL)
 let timestamps = try model.getSpeechTimestamps(audio, sampleRate: sampleRate)
@@ -40,4 +40,4 @@ state = newState
 
 ## Sample Rate
 
-Silero supports 16 kHz and 8 kHz. Other rates are rejected with `SileroVADError.unsupportedSampleRate`. The Swift port does not auto-resample — convert your audio with `MLXAudioCore.resampleAudio` first if needed.
+Silero v6 supports 16 kHz. Silero v5 supports 16 kHz and 8 kHz. Other rates are rejected with `SileroVADError.unsupportedSampleRate`. The Swift port does not auto-resample — convert your audio with `MLXAudioCore.resampleAudio` first if needed.

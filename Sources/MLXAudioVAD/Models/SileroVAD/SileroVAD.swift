@@ -32,17 +32,20 @@ public enum SileroVADError: Error, LocalizedError {
     case stateSampleRateMismatch(expected: Int, got: Int)
     case unexpectedChunkSize(expected: Int, got: Int)
     case insufficientReflectPadInput(samples: Int, pad: Int)
+    case checkpointKeyMismatch(missing: [String], unexpected: [String])
 
     public var errorDescription: String? {
         switch self {
         case .invalidRepositoryID(let r): return "Invalid repository ID: \(r)"
-        case .unsupportedSampleRate(let s): return "Silero VAD supports 8000 Hz and 16000 Hz audio (got \(s))"
+        case .unsupportedSampleRate(let s): return "Silero VAD checkpoint does not support \(s) Hz audio"
         case .stateSampleRateMismatch(let exp, let got):
             return "Streaming state is for \(exp) Hz, got \(got) Hz"
         case .unexpectedChunkSize(let exp, let got):
             return "Expected \(exp) samples per chunk, got \(got)"
         case .insufficientReflectPadInput(let s, let p):
             return "Reflect padding of \(p) requires more than \(p) samples (got \(s))"
+        case .checkpointKeyMismatch(let missing, let unexpected):
+            return "Silero VAD checkpoint key mismatch. missing=\(missing), unexpected=\(unexpected)"
         }
     }
 }
@@ -145,7 +148,7 @@ public final class SileroVAD: Module {
     private func branch(forSampleRate sr: Int) throws -> SileroVADBranch {
         switch sr {
         case 16000: return branch16k
-        case 8000: return branch8k
+        case 8000 where config.supports8k: return branch8k
         default: throw SileroVADError.unsupportedSampleRate(sr)
         }
     }
@@ -370,8 +373,23 @@ public final class SileroVAD: Module {
             for (k, v) in w { allWeights[k] = v }
         }
         let sanitized = sanitize(weights: allWeights)
+        let expectedKeys = Set(model.parameters().flattened().map(\.0)).filter {
+            config.supports8k || !$0.hasPrefix("branch8k.")
+        }
+        let checkpointKeys = Set(sanitized.keys)
+        let missingKeys = expectedKeys.subtracting(checkpointKeys).sorted()
+        let unexpectedKeys = checkpointKeys.subtracting(expectedKeys).sorted()
+        guard missingKeys.isEmpty, unexpectedKeys.isEmpty else {
+            throw SileroVADError.checkpointKeyMismatch(
+                missing: missingKeys,
+                unexpected: unexpectedKeys
+            )
+        }
         let parameters = ModuleParameters.unflattened(sanitized)
-        try model.update(parameters: parameters, verify: [.all])
+        try model.update(
+            parameters: parameters,
+            verify: config.supports8k ? [.all] : [.noUnusedKeys]
+        )
         eval(model)
         return model
     }
