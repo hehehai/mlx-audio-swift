@@ -33,8 +33,8 @@ private struct DecodePassParams: Sendable {
     let model: UncheckedSendableBox<Qwen3ASRModel>
     let config: StreamingConfig
     let confirmedTokenIds: [Int]
-    /// completedText + confirmedText for display
-    let displayPrefix: String
+    /// Visible text frozen from completed encoder windows.
+    let completedText: String
     let prevProvisional: [Int]
     let prevFirstSeen: [Date]
     let prevAgreementCounts: [Int]
@@ -1103,7 +1103,10 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             var allTokens = state.confirmedTokenIds
             allTokens.append(contentsOf: state.provisionalTokenIds)
             if let tokenizer = model.tokenizer, !allTokens.isEmpty {
-                let windowText = tokenizer.decode(tokens: allTokens)
+                let windowText = model.streamingVisibleText(
+                    from: tokenizer.decode(tokens: allTokens),
+                    forcedLanguage: config.language
+                )
                 Self.appendText(windowText, to: &state.completedText)
             }
             // Reset — next decode is a fresh start on new pending frames
@@ -1158,14 +1161,13 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
         }
 
         let snapshot = shared.withLock { state -> ([Int], String, [Int], [Date], [Int]) in
-            let prefix = Self.concatText(state.completedText, state.confirmedText)
             return (state.confirmedTokenIds,
-                    prefix,
+                    state.completedText,
                     state.provisionalTokenIds,
                     state.provisionalFirstSeen,
                     state.provisionalAgreementCounts)
         }
-        let (confirmedTokenIds, displayPrefix, prevProvisional, prevFirstSeen, prevAgreementCounts) = snapshot
+        let (confirmedTokenIds, completedText, prevProvisional, prevFirstSeen, prevAgreementCounts) = snapshot
         let minAgreementPasses: Int
         if let boundaryFastDecodeUntil,
            Date() < boundaryFastDecodeUntil
@@ -1180,7 +1182,7 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             model: UncheckedSendableBox(self.model),
             config: self.config,
             confirmedTokenIds: confirmedTokenIds,
-            displayPrefix: displayPrefix,
+            completedText: completedText,
             prevProvisional: prevProvisional,
             prevFirstSeen: prevFirstSeen,
             prevAgreementCounts: prevAgreementCounts,
@@ -1414,6 +1416,7 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
         )
 
         var allTokenIds: [Int] = params.confirmedTokenIds
+        let confirmedDecodedText = tokenizer.decode(tokens: params.confirmedTokenIds)
         let startTime = Date()
 
         for token in params.confirmedTokenIds {
@@ -1441,11 +1444,14 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             allTokenIds.append(nextToken)
 
             if allTokenIds.count > confirmedCount {
-                let newProvisional = Array(allTokenIds.dropFirst(confirmedCount))
-                let provText = tokenizer.decode(tokens: newProvisional)
+                let visibleParts = model.streamingVisibleTextParts(
+                    confirmedDecodedText: confirmedDecodedText,
+                    combinedDecodedText: tokenizer.decode(tokens: allTokenIds),
+                    forcedLanguage: params.config.language
+                )
                 continuation?.yield(.displayUpdate(
-                    confirmedText: params.displayPrefix,
-                    provisionalText: provText
+                    confirmedText: Self.concatText(params.completedText, visibleParts.confirmedText),
+                    provisionalText: visibleParts.provisionalText
                 ))
             }
 
@@ -1535,15 +1541,23 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
         }
 
         let promoteCount = promotionCount
+        let confirmedTokenIds = params.confirmedTokenIds + Array(newProvisional.prefix(promoteCount))
         let finalProvisional = Array(newProvisional.dropFirst(promoteCount))
         let finalFirstSeen = Array(nextFirstSeen.dropFirst(promoteCount))
         let finalAgreementCounts = Array(nextAgreementCounts.dropFirst(promoteCount))
+        let visibleParts = params.model.value.streamingVisibleTextParts(
+            confirmedDecodedText: tokenizer.decode(tokens: Array(confirmedTokenIds)),
+            combinedDecodedText: tokenizer.decode(tokens: allTokenIds),
+            forcedLanguage: params.config.language
+        )
 
         let displayPrefix: String = sharedState.withLock { state in
             if promoteCount > 0 {
                 let promoted = Array(newProvisional.prefix(promoteCount))
                 state.confirmedTokenIds.append(contentsOf: promoted)
-                state.confirmedText = tokenizer.decode(tokens: state.confirmedTokenIds)
+            }
+            state.confirmedText = visibleParts.confirmedText
+            if promoteCount > 0 {
                 continuation?.yield(.confirmed(text: Self.concatText(state.completedText, state.confirmedText)))
             }
             state.provisionalTokenIds = finalProvisional
@@ -1552,10 +1566,9 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             return Self.concatText(state.completedText, state.confirmedText)
         }
 
-        let finalProvText = tokenizer.decode(tokens: finalProvisional)
         continuation?.yield(.displayUpdate(
             confirmedText: displayPrefix,
-            provisionalText: finalProvText
+            provisionalText: visibleParts.provisionalText
         ))
 
         let totalAudioSeconds = Double(totalSamples) / 16000.0
@@ -1617,10 +1630,14 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 let windowText = tokenizer.decode(tokens: tokenIds)
                 selectedWindowText = windowText
             }
-            if selectedWindowText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+            let visibleWindowText = model.streamingVisibleText(
+                from: selectedWindowText,
+                forcedLanguage: params.config.language
+            )
+            if visibleWindowText.isEmpty { continue }
 
             sharedState.withLock { state in
-                Self.appendText(selectedWindowText, to: &state.completedText)
+                Self.appendText(visibleWindowText, to: &state.completedText)
                 state.confirmedTokenIds = []
                 state.provisionalTokenIds = []
                 state.provisionalFirstSeen = []
@@ -1709,7 +1726,10 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                     state.provisionalAgreementCounts = []
                 }
                 if let tokenizer = model.tokenizer, !state.confirmedTokenIds.isEmpty {
-                    state.confirmedText = tokenizer.decode(tokens: state.confirmedTokenIds)
+                    state.confirmedText = model.streamingVisibleText(
+                        from: tokenizer.decode(tokens: state.confirmedTokenIds),
+                        forcedLanguage: config.language
+                    )
                 }
                 return Self.concatText(state.completedText, state.confirmedText)
             }
@@ -1745,7 +1765,10 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 )
                 if Task.isCancelled { return }
 
-                let windowText = tokenizer.decode(tokens: tokenIds)
+                let windowText = model.streamingVisibleText(
+                    from: tokenizer.decode(tokens: tokenIds),
+                    forcedLanguage: config.language
+                )
                 if windowText.isEmpty { continue }
 
                 shared.withLock { state in
@@ -1784,7 +1807,10 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 state.provisionalTokenIds = []
                 state.provisionalFirstSeen = []
                 state.provisionalAgreementCounts = []
-                state.confirmedText = tokenizer.decode(tokens: tokenIds)
+                state.confirmedText = model.streamingVisibleText(
+                    from: tokenizer.decode(tokens: tokenIds),
+                    forcedLanguage: config.language
+                )
                 return Self.concatText(state.completedText, state.confirmedText)
             }
 
@@ -1806,7 +1832,10 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                     state.provisionalAgreementCounts = []
                 }
                 if let tokenizer = model.tokenizer, !state.confirmedTokenIds.isEmpty {
-                    state.confirmedText = tokenizer.decode(tokens: state.confirmedTokenIds)
+                    state.confirmedText = model.streamingVisibleText(
+                        from: tokenizer.decode(tokens: state.confirmedTokenIds),
+                        forcedLanguage: config.language
+                    )
                 }
                 return Self.concatText(state.completedText, state.confirmedText)
             }

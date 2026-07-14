@@ -1126,6 +1126,49 @@ public class Qwen3ASRModel: Module {
         return ("English", trimmed)
     }
 
+    func streamingVisibleText(from decodedText: String, forcedLanguage: String?) -> String {
+        let trimmed = decodedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizeLanguageName(forcedLanguage) == nil else {
+            return trimmed
+        }
+
+        let parsed = extractLanguage(from: decodedText)
+        if parsed.language != nil {
+            return parsed.text
+        }
+
+        let languagePrefix = "language "
+        if languagePrefix.hasPrefix(trimmed) || trimmed.hasPrefix(languagePrefix) {
+            return ""
+        }
+
+        return trimmed
+    }
+
+    func streamingVisibleTextParts(
+        confirmedDecodedText: String,
+        combinedDecodedText: String,
+        forcedLanguage: String?
+    ) -> (confirmedText: String, provisionalText: String) {
+        let confirmedText = streamingVisibleText(
+            from: confirmedDecodedText,
+            forcedLanguage: forcedLanguage
+        )
+        let combinedText = streamingVisibleText(
+            from: combinedDecodedText,
+            forcedLanguage: forcedLanguage
+        )
+
+        guard combinedText.hasPrefix(confirmedText) else {
+            return ("", combinedText)
+        }
+
+        return (
+            confirmedText,
+            String(combinedText.dropFirst(confirmedText.count))
+        )
+    }
+
     static func mergeLanguages(_ languages: [String?]) -> String? {
         var seen: Set<String> = []
         var merged: [String] = []

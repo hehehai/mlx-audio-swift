@@ -1796,6 +1796,49 @@ struct Qwen3ASRModuleSetupTests {
         #expect(parsed.text == "hello world")
     }
 
+    @Test func qwen3ASRStreamingHidesIncompleteAutomaticLanguagePrefix() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig())
+
+        #expect(model.streamingVisibleText(from: "lang", forcedLanguage: nil).isEmpty)
+        #expect(model.streamingVisibleText(from: "language Chinese<asr_", forcedLanguage: nil).isEmpty)
+        #expect(
+            model.streamingVisibleText(
+                from: "language Chinese<asr_text>你好",
+                forcedLanguage: nil
+            ) == "你好"
+        )
+        #expect(
+            model.streamingVisibleText(
+                from: "language English<asr_text>language models",
+                forcedLanguage: nil
+            ) == "language models"
+        )
+    }
+
+    @Test func qwen3ASRStreamingSplitsVisibleConfirmedAndProvisionalTextAcrossProtocolBoundary() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig())
+
+        let parts = model.streamingVisibleTextParts(
+            confirmedDecodedText: "language Chinese<asr_",
+            combinedDecodedText: "language Chinese<asr_text>你好",
+            forcedLanguage: nil
+        )
+
+        #expect(parts.confirmedText.isEmpty)
+        #expect(parts.provisionalText == "你好")
+    }
+
+    @Test func qwen3ASRStreamingKeepsForcedLanguageTextVerbatim() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig(supportLanguages: ["Chinese"]))
+
+        #expect(
+            model.streamingVisibleText(
+                from: "language Chinese is metadata",
+                forcedLanguage: "Chinese"
+            ) == "language Chinese is metadata"
+        )
+    }
+
     @Test func qwen3ASRMergeLanguagesDeduplicatesInOrder() {
         let merged = Qwen3ASRModel.mergeLanguages(["Chinese", "", "English", "Chinese", nil])
 
