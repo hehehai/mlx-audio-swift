@@ -36,7 +36,8 @@ final class VoxtralRealtimeAdaRMSNorm: Module {
     }
 
     func callAsFunction(_ x: MLXArray, adaScale: MLXArray) -> MLXArray {
-        x * (1.0 + adaScale)
+        // Cast the float32 adaScale down so it doesn't promote the fp16 hidden state.
+        x * (1.0 + adaScale.asType(x.dtype))
     }
 }
 
@@ -129,7 +130,8 @@ final class VoxtralRealtimeDecoderAttention: Module {
             let causal = kPos .<= qPos
             let window = kPos .>= (qPos - MLXArray(Int32(slidingWindow - 1)))
             let allowed = logicalAnd(causal, window)
-            let mask = MLX.where(allowed, MLXArray(0.0), MLXArray(-1e9))
+            // Match the activation dtype: a float32 mask over fp16 q/k aborts SDPA.
+            let mask = MLX.where(allowed, MLXArray(0.0), MLXArray(-1e9)).asType(q.dtype)
             maskMode = .array(mask)
         }
 
