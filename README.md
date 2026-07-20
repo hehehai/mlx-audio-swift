@@ -258,8 +258,8 @@ let audio = try await model.generate(
 
 - **macOS 14+** or **iOS 17+**
 - **Apple Silicon** (M1 or later) recommended for optimal performance
-- **Xcode 15+**
-- **Swift 5.9+**
+- **Xcode 26.5+**
+- **Swift 6.3+**
 
 ## Examples
 
