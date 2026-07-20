@@ -1,4 +1,4 @@
-// swift-tools-version:6.3
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
@@ -60,7 +60,7 @@ let package = Package(
 
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.31.6")),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.4"),
         .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.4")),
         .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.3.3")),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", .upToNextMajor(from: "0.9.0"))
