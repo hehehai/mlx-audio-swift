@@ -49,7 +49,10 @@ extension Qwen3ASRModel: STTGenerationModel {
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration,
             repetitionPenalty: generationParameters.repetitionPenalty,
-            repetitionContextSize: generationParameters.repetitionContextSize
+            repetitionContextSize: generationParameters.repetitionContextSize,
+            kvBits: generationParameters.kvBits,
+            kvGroupSize: generationParameters.kvGroupSize,
+            quantizedKVStart: generationParameters.quantizedKVStart
         )
     }
 
@@ -66,7 +69,10 @@ extension Qwen3ASRModel: STTGenerationModel {
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration,
             repetitionPenalty: generationParameters.repetitionPenalty,
-            repetitionContextSize: generationParameters.repetitionContextSize
+            repetitionContextSize: generationParameters.repetitionContextSize,
+            kvBits: generationParameters.kvBits,
+            kvGroupSize: generationParameters.kvGroupSize,
+            quantizedKVStart: generationParameters.quantizedKVStart
         )
     }
 }
@@ -1247,7 +1253,10 @@ public class Qwen3ASRModel: Module {
         context: String,
         language: String?,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> (text: String, language: String?, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
@@ -1274,7 +1283,7 @@ public class Qwen3ASRModel: Module {
             inputIds: inputIds
         )
 
-        let cache = makeCache()
+        var cache = makeCache()
 
         // Chunked prefill (mlx-lm.generate_step pattern): keeps lazy graph small,
         // materializes cache state between chunks, frees intermediate buffers.
@@ -1290,6 +1299,12 @@ public class Qwen3ASRModel: Module {
                 inputEmbeddings: chunkEmbeds,
                 cache: cache
             )
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
+            )
             eval(chunkLogits)
             Memory.clearCache()
             processedTokens += n
@@ -1301,6 +1316,12 @@ public class Qwen3ASRModel: Module {
             inputIds: lastIds,
             inputEmbeddings: lastEmbeds,
             cache: cache
+        )
+        maybeQuantizeKVCache(
+            cache: &cache,
+            kvBits: kvBits,
+            kvGroupSize: kvGroupSize,
+            quantizedKVStart: quantizedKVStart
         )
 
         var firstLast = firstLogits[0..., -1, 0...]
@@ -1339,6 +1360,12 @@ public class Qwen3ASRModel: Module {
 
             let nextInArr = MLXArray([Int32(prevTokenInt)]).expandedDimensions(axis: 0)
             let nextLogits = callAsFunction(inputIds: nextInArr, cache: cache)
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
+            )
             var nextLast = nextLogits[0..., -1, 0...]
             if temperature > 0 {
                 nextLast = nextLast / temperature
@@ -1386,7 +1413,10 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> STTOutput {
         let startTime = Date()
         let forcedLanguage = normalizeLanguageName(language)
@@ -1418,7 +1448,10 @@ public class Qwen3ASRModel: Module {
                 context: context,
                 language: forcedLanguage,
                 repetitionPenalty: repetitionPenalty,
-                repetitionContextSize: repetitionContextSize
+                repetitionContextSize: repetitionContextSize,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
             )
 
             allTexts.append(result.text)
@@ -1469,7 +1502,10 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> AsyncThrowingStream<STTGeneration, Error> {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
@@ -1527,11 +1563,17 @@ public class Qwen3ASRModel: Module {
                             inputIds: inputIds
                         )
 
-                        let cache = model.makeCache()
+                        var cache = model.makeCache()
                         var logits = model.callAsFunction(
                             inputIds: inputIds,
                             inputEmbeddings: inputsEmbeds,
                             cache: cache
+                        )
+                        maybeQuantizeKVCache(
+                            cache: &cache,
+                            kvBits: kvBits,
+                            kvGroupSize: kvGroupSize,
+                            quantizedKVStart: quantizedKVStart
                         )
                         eval(logits)
 
@@ -1596,6 +1638,12 @@ public class Qwen3ASRModel: Module {
 
                             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
                             logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
+                            maybeQuantizeKVCache(
+                                cache: &cache,
+                                kvBits: kvBits,
+                                kvGroupSize: kvGroupSize,
+                                quantizedKVStart: quantizedKVStart
+                            )
                             eval(logits)
                         }
 

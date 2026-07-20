@@ -50,6 +50,7 @@
 import Foundation
 import Testing
 import MLX
+import MLXLMCommon
 import MLXNN
 
 @testable import MLXAudioCore
@@ -1635,6 +1636,25 @@ struct Qwen3ASRModuleSetupTests {
         #expect(output.shape == [batchSize, seqLen, config.hiddenSize])
     }
 
+    @Test func qwen3TextAttentionSupportsQuantizedKVCache() {
+        let config = Qwen3TextConfig(
+            hiddenSize: 256,
+            numHiddenLayers: 2,
+            numAttentionHeads: 4,
+            numKeyValueHeads: 2,
+            headDim: 64
+        )
+        let attention = Qwen3ASRTextAttention(config, layerIdx: 0)
+        let cache = QuantizedKVCache(groupSize: 32, bits: 8)
+        let hiddenStates = MLXArray.ones([1, 8, config.hiddenSize])
+
+        let output = attention(hiddenStates, mask: .none, cache: cache)
+        eval(output)
+
+        #expect(output.shape == [1, 8, config.hiddenSize])
+        #expect(cache.offset == 8)
+    }
+
     @Test func qwen3TextDecoderLayerShape() {
         let config = Qwen3TextConfig(
             hiddenSize: 256,
@@ -1902,6 +1922,22 @@ struct Qwen3ASRModuleSetupTests {
         let cache = model.makeCache()
 
         #expect(cache.count == 4)
+    }
+
+    @Test func sttGenerateParametersExposeKVCacheQuantization() {
+        let defaults = STTGenerateParameters()
+        #expect(defaults.kvBits == nil)
+        #expect(defaults.kvGroupSize == 64)
+        #expect(defaults.quantizedKVStart == 0)
+
+        let quantized = STTGenerateParameters(
+            kvBits: 4,
+            kvGroupSize: 32,
+            quantizedKVStart: 256
+        )
+        #expect(quantized.kvBits == 4)
+        #expect(quantized.kvGroupSize == 32)
+        #expect(quantized.quantizedKVStart == 256)
     }
 
     // MARK: - Weight Sanitization Tests

@@ -293,6 +293,7 @@ let package = Package(
                 "MLXAudioLID",
                 "mlx-audio-swift-lid",
                 "MLXAudioG2P",
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
             ],
             path: "Tests",
             resources: [

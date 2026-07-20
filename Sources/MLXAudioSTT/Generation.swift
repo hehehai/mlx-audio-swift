@@ -13,6 +13,9 @@ public struct STTGenerateParameters: Sendable {
     public let minChunkDuration: Float
     public let repetitionPenalty: Float
     public let repetitionContextSize: Int
+    public let kvBits: Int?
+    public let kvGroupSize: Int
+    public let quantizedKVStart: Int
 
     public init(
         maxTokens: Int = 8192,
@@ -26,7 +29,10 @@ public struct STTGenerateParameters: Sendable {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) {
         self.maxTokens = maxTokens
         self.temperature = temperature
@@ -40,6 +46,9 @@ public struct STTGenerateParameters: Sendable {
         self.minChunkDuration = minChunkDuration
         self.repetitionPenalty = repetitionPenalty
         self.repetitionContextSize = repetitionContextSize
+        self.kvBits = kvBits
+        self.kvGroupSize = kvGroupSize
+        self.quantizedKVStart = quantizedKVStart
     }
 }
 
