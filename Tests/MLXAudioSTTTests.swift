@@ -1940,6 +1940,22 @@ struct Qwen3ASRModuleSetupTests {
         #expect(quantized.quantizedKVStart == 256)
     }
 
+    @Test func streamingConfigExposesKVCacheQuantization() {
+        let defaults = StreamingConfig()
+        #expect(defaults.kvBits == nil)
+        #expect(defaults.kvGroupSize == 64)
+        #expect(defaults.quantizedKVStart == 0)
+
+        let quantized = StreamingConfig(
+            kvBits: 8,
+            kvGroupSize: 32,
+            quantizedKVStart: 256
+        )
+        #expect(quantized.kvBits == 8)
+        #expect(quantized.kvGroupSize == 32)
+        #expect(quantized.quantizedKVStart == 256)
+    }
+
     // MARK: - Weight Sanitization Tests
 
     @Test func qwen3ASRSanitizeStripsThinkerPrefix() {

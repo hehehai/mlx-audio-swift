@@ -1398,11 +1398,17 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             inputIds: inputIds
         )
 
-        let cache = model.makeCache()
+        var cache = model.makeCache()
         var logits = model.callAsFunction(
             inputIds: inputIds,
             inputEmbeddings: inputsEmbeds,
             cache: cache
+        )
+        maybeQuantizeKVCache(
+            cache: &cache,
+            kvBits: params.config.kvBits,
+            kvGroupSize: params.config.kvGroupSize,
+            quantizedKVStart: params.config.quantizedKVStart
         )
         eval(logits)
 
@@ -1424,6 +1430,12 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
 
             let tokenArray = MLXArray([Int32(token)]).expandedDimensions(axis: 0)
             logits = model.callAsFunction(inputIds: tokenArray, cache: cache)
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: params.config.kvBits,
+                kvGroupSize: params.config.kvGroupSize,
+                quantizedKVStart: params.config.quantizedKVStart
+            )
             eval(logits)
         }
 
@@ -1457,6 +1469,12 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: params.config.kvBits,
+                kvGroupSize: params.config.kvGroupSize,
+                quantizedKVStart: params.config.quantizedKVStart
+            )
             eval(logits)
         }
 
@@ -1897,11 +1915,17 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             inputIds: inputIds
         )
 
-        let cache = model.makeCache()
+        var cache = model.makeCache()
         var logits = model.callAsFunction(
             inputIds: inputIds,
             inputEmbeddings: inputsEmbeds,
             cache: cache
+        )
+        maybeQuantizeKVCache(
+            cache: &cache,
+            kvBits: config.kvBits,
+            kvGroupSize: config.kvGroupSize,
+            quantizedKVStart: config.quantizedKVStart
         )
         eval(logits)
 
@@ -1929,6 +1953,12 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
 
             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
             logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: config.kvBits,
+                kvGroupSize: config.kvGroupSize,
+                quantizedKVStart: config.quantizedKVStart
+            )
             eval(logits)
         }
 

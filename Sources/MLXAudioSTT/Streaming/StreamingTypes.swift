@@ -64,6 +64,12 @@ public struct StreamingConfig: Sendable {
     public var prompt: String?
     /// Optional punctuation and capitalization override. Models without task-token support ignore it.
     public var usePunctuation: Bool?
+    /// Optional KV cache quantization bit width for Qwen decoding.
+    public var kvBits: Int?
+    /// Quantization group size for Qwen KV caches.
+    public var kvGroupSize: Int
+    /// Prompt length threshold before Qwen KV caches are quantized.
+    public var quantizedKVStart: Int
 
     public init(
         decodeIntervalSeconds: Double = 1.0,
@@ -80,7 +86,10 @@ public struct StreamingConfig: Sendable {
         maxDecodeWindows: Int = 1,
         finalizeCompletedWindows: Bool = true,
         prompt: String? = nil,
-        usePunctuation: Bool? = nil
+        usePunctuation: Bool? = nil,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
         self.boundaryDecodeIntervalSeconds = boundaryDecodeIntervalSeconds
@@ -97,6 +106,9 @@ public struct StreamingConfig: Sendable {
         self.finalizeCompletedWindows = finalizeCompletedWindows
         self.prompt = prompt
         self.usePunctuation = usePunctuation
+        self.kvBits = kvBits
+        self.kvGroupSize = kvGroupSize
+        self.quantizedKVStart = quantizedKVStart
     }
 }
 
