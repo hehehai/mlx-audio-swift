@@ -105,8 +105,16 @@ public final class NemotronASRStreamingSession: @unchecked Sendable {
 
     private func publishEnded() {
         let text = session.text
+        let segments = session.segments
         previousText = text
-        continuation.yield(.ended(fullText: text))
+        continuation.yield(
+            .ended(
+                STTOutput(
+                    text: text,
+                    segments: segments.isEmpty ? nil : segments
+                )
+            )
+        )
     }
 
     private func publishStats() {

@@ -126,8 +126,12 @@ public enum TranscriptionEvent: Sendable {
     case stats(StreamingStats)
     /// Session terminated because inference failed
     case failed(StreamingFailure)
-    /// Session has ended with final text
-    case ended(fullText: String)
+    /// Session has ended with the final structured transcription output.
+    ///
+    /// `output.text` is always the session transcript. Models that expose timing,
+    /// language, or speaker metadata populate the corresponding `STTOutput` fields
+    /// with the same semantics as their batch `generate` / `generateStream` paths.
+    case ended(STTOutput)
 }
 
 /// A sendable failure value emitted by a streaming inference session.

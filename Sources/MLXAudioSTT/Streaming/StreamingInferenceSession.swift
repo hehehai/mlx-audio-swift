@@ -24,6 +24,12 @@ private struct SessionSharedState: Sendable {
     var provisionalAgreementCounts: [Int] = []
     var confirmedText: String = ""
     var isDecoding: Bool = false
+    /// Frozen encoder-window segments aligned with batch chunk-segment semantics.
+    var finalizedSegments: [STTTranscriptSegment] = []
+    /// Per-window languages observed while freezing completed windows.
+    var detectedLanguages: [String?] = []
+    /// Next segment start time in seconds for finalized windows.
+    var nextSegmentStartSeconds: Double = 0
 }
 
 // MARK: - Decode Pass Parameters
@@ -96,6 +102,9 @@ private struct CohereDecodeLaunch: Sendable {
 private struct MossStreamingSharedState: Sendable {
     var completedText: String = ""
     var provisionalText: String = ""
+    /// Finalized window outputs used to build the ended `STTOutput`.
+    var finalizedOutputs: [STTOutput] = []
+    var sessionStartedAt: Date = Date()
 }
 
 private struct MossAudioStreamingSharedState: Sendable {
@@ -375,6 +384,7 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
             let completed = sharedState.withLock { state -> String in
                 appendMossText(text, to: &state.completedText)
                 state.provisionalText = ""
+                state.finalizedOutputs.append(output)
                 return state.completedText
             }
             continuation?.yield(.displayUpdate(
@@ -524,18 +534,45 @@ private final class MossStreamingInferenceSessionCore: @unchecked Sendable, Stre
             }
         }
 
-        let finalText = shared.withLock { state in
+        let endedOutput = shared.withLock { state -> STTOutput in
+            let finalText: String
             if state.completedText.isEmpty {
-                return state.provisionalText
+                finalText = state.provisionalText
+            } else {
+                finalText = state.completedText
             }
-            return state.completedText
+            let totalTime = Date().timeIntervalSince(state.sessionStartedAt)
+            if state.finalizedOutputs.isEmpty {
+                return STTOutput(text: finalText, totalTime: totalTime)
+            }
+            let combined = MossTranscribeDiarizeModel.combineChunkOutputs(
+                state.finalizedOutputs,
+                totalTime: totalTime
+            )
+            // Prefer the live-display transcript when combine/join differs only by whitespace.
+            if combined.text == finalText || finalText.isEmpty {
+                return combined
+            }
+            return STTOutput(
+                text: finalText,
+                segments: combined.segments,
+                language: combined.language,
+                languageProvenance: combined.languageProvenance,
+                promptTokens: combined.promptTokens,
+                generationTokens: combined.generationTokens,
+                totalTokens: combined.totalTokens,
+                promptTps: combined.promptTps,
+                generationTps: combined.generationTps,
+                totalTime: combined.totalTime,
+                peakMemoryUsage: combined.peakMemoryUsage
+            )
         }
 
         if Task.isCancelled {
             return
         }
 
-        continuation?.yield(.ended(fullText: finalText))
+        continuation?.yield(.ended(endedOutput))
         continuation?.finish()
 
         sessionLock.withLock { _ in
@@ -950,7 +987,16 @@ private final class CohereStreamingInferenceSessionCore: @unchecked Sendable, St
             return
         }
 
-        continuation?.yield(.ended(fullText: finalText))
+        let language = config.language
+        continuation?.yield(
+            .ended(
+                STTOutput(
+                    text: finalText,
+                    language: language,
+                    languageProvenance: language == nil ? .modelDefault : .requested
+                )
+            )
+        )
         continuation?.finish()
 
         sessionLock.withLock { _ in
@@ -1097,17 +1143,28 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
     private func freezeCompletedWindowsLocked() {
         let currentWindowCount = encoder.encodedWindowCount
         guard currentWindowCount > frozenWindowCount else { return }
+        let newlyFrozenWindows = currentWindowCount - frozenWindowCount
+        // Encoder windows are ~8s of audio (800 mel frames at hop 160 / 16 kHz).
+        let durationSeconds = Double(newlyFrozenWindows) * 8.0
 
         shared.withLock { state in
             // Promote provisional and freeze everything
             var allTokens = state.confirmedTokenIds
             allTokens.append(contentsOf: state.provisionalTokenIds)
             if let tokenizer = model.tokenizer, !allTokens.isEmpty {
+                let rawDecoded = tokenizer.decode(tokens: allTokens)
+                let parsed = model.parseGeneratedChunk(rawDecoded, forcedLanguage: config.language)
                 let windowText = model.streamingVisibleText(
-                    from: tokenizer.decode(tokens: allTokens),
+                    from: rawDecoded,
                     forcedLanguage: config.language
                 )
                 Self.appendText(windowText, to: &state.completedText)
+                Self.appendFinalizedWindowSegment(
+                    to: &state,
+                    text: parsed.text,
+                    language: parsed.language,
+                    durationSeconds: durationSeconds
+                )
             }
             // Reset — next decode is a fresh start on new pending frames
             state.confirmedTokenIds = []
@@ -1648,14 +1705,25 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 let windowText = tokenizer.decode(tokens: tokenIds)
                 selectedWindowText = windowText
             }
+            let parsed = model.parseGeneratedChunk(
+                selectedWindowText,
+                forcedLanguage: params.config.language
+            )
             let visibleWindowText = model.streamingVisibleText(
                 from: selectedWindowText,
                 forcedLanguage: params.config.language
             )
             if visibleWindowText.isEmpty { continue }
+            let durationSeconds = Double(max(0, audioFeatures.dim(0))) / 13.0
 
             sharedState.withLock { state in
                 Self.appendText(visibleWindowText, to: &state.completedText)
+                Self.appendFinalizedWindowSegment(
+                    to: &state,
+                    text: parsed.text,
+                    language: parsed.language,
+                    durationSeconds: durationSeconds
+                )
                 state.confirmedTokenIds = []
                 state.provisionalTokenIds = []
                 state.provisionalFirstSeen = []
@@ -1783,14 +1851,23 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 )
                 if Task.isCancelled { return }
 
+                let rawDecoded = tokenizer.decode(tokens: tokenIds)
+                let parsed = model.parseGeneratedChunk(rawDecoded, forcedLanguage: config.language)
                 let windowText = model.streamingVisibleText(
-                    from: tokenizer.decode(tokens: tokenIds),
+                    from: rawDecoded,
                     forcedLanguage: config.language
                 )
                 if windowText.isEmpty { continue }
+                let durationSeconds = Double(max(0, audioFeatures.dim(0))) / 13.0
 
                 shared.withLock { state in
                     Self.appendText(windowText, to: &state.completedText)
+                    Self.appendFinalizedWindowSegment(
+                        to: &state,
+                        text: parsed.text,
+                        language: parsed.language,
+                        durationSeconds: durationSeconds
+                    )
                     state.confirmedTokenIds = []
                     state.provisionalTokenIds = []
                     state.provisionalFirstSeen = []
@@ -1802,7 +1879,7 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             Memory.clearCache()
         }
 
-        let finalText: String
+        let endedOutput: STTOutput
         if let audioFeatures = snapshot.pendingAudioFeatures?.value,
            let tokenizer = model.tokenizer
         {
@@ -1819,17 +1896,33 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
 
             let decodeTime = Date().timeIntervalSince(startTime)
             Memory.clearCache()
+            let rawDecoded = tokenizer.decode(tokens: tokenIds)
+            let parsed = model.parseGeneratedChunk(rawDecoded, forcedLanguage: config.language)
+            let visibleText = model.streamingVisibleText(
+                from: rawDecoded,
+                forcedLanguage: config.language
+            )
+            let durationSeconds = Double(max(0, audioFeatures.dim(0))) / 13.0
 
-            finalText = shared.withLock { state in
+            endedOutput = shared.withLock { state in
                 state.confirmedTokenIds = tokenIds
                 state.provisionalTokenIds = []
                 state.provisionalFirstSeen = []
                 state.provisionalAgreementCounts = []
-                state.confirmedText = model.streamingVisibleText(
-                    from: tokenizer.decode(tokens: tokenIds),
-                    forcedLanguage: config.language
+                state.confirmedText = visibleText
+                Self.appendFinalizedWindowSegment(
+                    to: &state,
+                    text: parsed.text,
+                    language: parsed.language,
+                    durationSeconds: durationSeconds
                 )
-                return Self.concatText(state.completedText, state.confirmedText)
+                let finalText = Self.concatText(state.completedText, state.confirmedText)
+                return Self.makeEndedOutput(
+                    finalText: finalText,
+                    state: state,
+                    totalSamples: snapshot.totalSamples,
+                    config: config
+                )
             }
 
             let totalAudioSeconds = Double(snapshot.totalSamples) / 16000.0
@@ -1842,20 +1935,47 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
                 peakMemoryGB: Double(Memory.peakMemory) / 1e9
             )))
         } else {
-            finalText = shared.withLock { state in
-                if !state.provisionalTokenIds.isEmpty {
-                    state.confirmedTokenIds.append(contentsOf: state.provisionalTokenIds)
-                    state.provisionalTokenIds = []
-                    state.provisionalFirstSeen = []
-                    state.provisionalAgreementCounts = []
-                }
-                if let tokenizer = model.tokenizer, !state.confirmedTokenIds.isEmpty {
-                    state.confirmedText = model.streamingVisibleText(
-                        from: tokenizer.decode(tokens: state.confirmedTokenIds),
+            let trailingRaw: (rawDecoded: String, parsedText: String, language: String?, visibleText: String)? =
+                shared.withLock { state in
+                    if !state.provisionalTokenIds.isEmpty {
+                        state.confirmedTokenIds.append(contentsOf: state.provisionalTokenIds)
+                        state.provisionalTokenIds = []
+                        state.provisionalFirstSeen = []
+                        state.provisionalAgreementCounts = []
+                    }
+                    guard let tokenizer = model.tokenizer, !state.confirmedTokenIds.isEmpty else {
+                        return nil
+                    }
+                    let rawDecoded = tokenizer.decode(tokens: state.confirmedTokenIds)
+                    let parsed = model.parseGeneratedChunk(rawDecoded, forcedLanguage: config.language)
+                    let visibleText = model.streamingVisibleText(
+                        from: rawDecoded,
                         forcedLanguage: config.language
                     )
+                    return (rawDecoded, parsed.text, parsed.language, visibleText)
                 }
-                return Self.concatText(state.completedText, state.confirmedText)
+
+            endedOutput = shared.withLock { state in
+                if let trailingRaw {
+                    state.confirmedText = trailingRaw.visibleText
+                    let remainingDuration = max(
+                        0,
+                        Double(snapshot.totalSamples) / 16000.0 - state.nextSegmentStartSeconds
+                    )
+                    Self.appendFinalizedWindowSegment(
+                        to: &state,
+                        text: trailingRaw.parsedText,
+                        language: trailingRaw.language,
+                        durationSeconds: remainingDuration
+                    )
+                }
+                let finalText = Self.concatText(state.completedText, state.confirmedText)
+                return Self.makeEndedOutput(
+                    finalText: finalText,
+                    state: state,
+                    totalSamples: snapshot.totalSamples,
+                    config: config
+                )
             }
         }
 
@@ -1863,7 +1983,7 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             return
         }
 
-        snapshot.continuation?.yield(.ended(fullText: finalText))
+        snapshot.continuation?.yield(.ended(endedOutput))
         snapshot.continuation?.finish()
 
         sessionLock.withLock { _ in
@@ -1890,6 +2010,66 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
             melProcessor.reset()
             boundaryFastDecodeUntil = nil
         }
+    }
+
+    private static func appendFinalizedWindowSegment(
+        to state: inout SessionSharedState,
+        text: String,
+        language: String?,
+        durationSeconds: Double
+    ) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let start = state.nextSegmentStartSeconds
+        let end = start + max(0, durationSeconds)
+        state.finalizedSegments.append(
+            STTTranscriptSegment(
+                text: trimmed,
+                startTime: start,
+                endTime: end,
+                language: language
+            )
+        )
+        state.detectedLanguages.append(language)
+        state.nextSegmentStartSeconds = end
+    }
+
+    private static func makeEndedOutput(
+        finalText: String,
+        state: SessionSharedState,
+        totalSamples: Int,
+        config: StreamingConfig
+    ) -> STTOutput {
+        let totalDuration = Double(max(0, totalSamples)) / 16000.0
+        var segments = state.finalizedSegments
+        if segments.isEmpty, !finalText.isEmpty {
+            segments = [
+                STTTranscriptSegment(
+                    text: finalText,
+                    startTime: 0,
+                    endTime: totalDuration,
+                    language: config.language ?? Qwen3ASRModel.mergeLanguages(state.detectedLanguages)
+                )
+            ]
+        }
+        let language: String?
+        let provenance: STTLanguageProvenance
+        if let forced = config.language?.trimmingCharacters(in: .whitespacesAndNewlines), !forced.isEmpty {
+            language = forced
+            provenance = .requested
+        } else if let detected = Qwen3ASRModel.mergeLanguages(state.detectedLanguages) {
+            language = detected
+            provenance = .detected
+        } else {
+            language = nil
+            provenance = .unknown
+        }
+        return STTOutput(
+            text: finalText,
+            segments: segments.isEmpty ? nil : segments,
+            language: language,
+            languageProvenance: provenance
+        )
     }
 
     private static func decodeAllTokenIds(
