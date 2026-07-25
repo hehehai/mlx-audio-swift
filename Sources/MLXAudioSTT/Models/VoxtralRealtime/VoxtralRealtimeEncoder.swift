@@ -92,6 +92,84 @@ final class VoxtralRealtimeCausalConv1d: Module {
     }
 }
 
+/// Attention inputs identical for every transformer layer of one encoder forward
+/// pass: the interleaved-RoPE cos/sin tables for `positions` and the SDPA mask.
+/// Built once per pass instead of per layer — same operations, so layer outputs
+/// are bit-identical; only the `nLayers` redundant kernel launches go away (which
+/// dominate streaming encoder steps, where each pass covers a few new frames).
+struct VoxtralRealtimeEncoderAttentionInputs {
+    let ropeCos: MLXArray
+    let ropeSin: MLXArray
+    let mask: MLXFast.ScaledDotProductAttentionMaskMode
+
+    /// Build the shared inputs for one forward pass of `seqLen` frames at
+    /// `positions`, extending `caches`. One mask can serve every layer because the
+    /// encoder always advances its layer caches in lockstep (created, extended,
+    /// trimmed, and reset together — asserted here). `dtype` is the q/k dtype the
+    /// mask must match; the uniform-precision projections preserve the input dtype.
+    static func build(
+        positions: MLXArray,
+        seqLen: Int,
+        caches: [VoxtralRealtimeEncoderKVCache?],
+        slidingWindow: Int,
+        headDim: Int,
+        ropeTheta: Float,
+        dtype: DType
+    ) -> VoxtralRealtimeEncoderAttentionInputs {
+        let (cos, sin) = voxtralComputeRopeFrequencies(
+            positions: positions,
+            headDim: headDim,
+            theta: ropeTheta
+        )
+
+        // Collapses "no caches" and "[nil, ...]" into one cache-less case. Nil-ness
+        // must be uniform across layers: nil and present-but-empty caches select
+        // different mask branches below.
+        let cache = caches.first ?? nil
+        let cachedLen = cache?.keys.shape[0] ?? 0
+        let cachedOffset = cache?.positionOffset ?? 0
+        precondition(
+            caches.allSatisfy {
+                ($0 == nil) == (cache == nil)
+                    && ($0?.keys.shape[0] ?? 0) == cachedLen
+                    && ($0?.positionOffset ?? 0) == cachedOffset
+            },
+            "encoder layer caches must advance in lockstep to share one attention mask"
+        )
+
+        // Mirror the concat + sliding-window trim the attention applies to its
+        // cache, so the mask covers the exact key positions each layer will use.
+        var positionOffset = cachedOffset
+        var kvLen = cachedLen + seqLen
+        if kvLen > slidingWindow {
+            positionOffset += kvLen - slidingWindow
+            kvLen = slidingWindow
+        }
+
+        let maskMode: MLXFast.ScaledDotProductAttentionMaskMode
+        if seqLen == 1 {
+            maskMode = .none
+        } else if cache == nil && seqLen <= slidingWindow {
+            maskMode = .causal
+        } else {
+            let qPos = positions.expandedDimensions(axis: 1)
+            let kPos = MLXArray(positionOffset..<(positionOffset + kvLen)).asType(.int32).expandedDimensions(axis: 0)
+            let causal = kPos .<= qPos
+            let window = kPos .>= (qPos - MLXArray(Int32(slidingWindow - 1)))
+            let allowed = logicalAnd(causal, window)
+            // Match the activation dtype: a float32 mask over fp16 q/k aborts SDPA.
+            let mask = MLX.where(allowed, MLXArray(0.0), MLXArray(-1e9)).asType(dtype)
+            maskMode = .array(mask)
+        }
+
+        return VoxtralRealtimeEncoderAttentionInputs(
+            ropeCos: cos,
+            ropeSin: sin,
+            mask: maskMode
+        )
+    }
+}
+
 final class VoxtralRealtimeEncoderAttention: Module {
     let nHeads: Int
     let headDim: Int
@@ -120,7 +198,7 @@ final class VoxtralRealtimeEncoderAttention: Module {
 
     func callAsFunction(
         _ x: MLXArray,
-        positions: MLXArray,
+        inputs: VoxtralRealtimeEncoderAttentionInputs,
         cache: VoxtralRealtimeEncoderKVCache?
     ) -> (MLXArray, VoxtralRealtimeEncoderKVCache) {
         let seqLen = x.shape[0]
@@ -129,14 +207,10 @@ final class VoxtralRealtimeEncoderAttention: Module {
         var k = wk(x)
         var v = wv(x)
 
-        let (cos, sin) = voxtralComputeRopeFrequencies(
-            positions: positions,
-            headDim: headDim,
-            theta: ropeTheta
-        )
-
-        q = voxtralApplyInterleavedRoPE(q, cos: cos, sin: sin, nHeads: nHeads, headDim: headDim)
-        k = voxtralApplyInterleavedRoPE(k, cos: cos, sin: sin, nHeads: nHeads, headDim: headDim)
+        q = voxtralApplyInterleavedRoPE(
+            q, cos: inputs.ropeCos, sin: inputs.ropeSin, nHeads: nHeads, headDim: headDim)
+        k = voxtralApplyInterleavedRoPE(
+            k, cos: inputs.ropeCos, sin: inputs.ropeSin, nHeads: nHeads, headDim: headDim)
 
         var positionOffset = cache?.positionOffset ?? 0
         if let cache {
@@ -163,28 +237,12 @@ final class VoxtralRealtimeEncoderAttention: Module {
         let k4 = k.reshaped(1, kvLen, nHeads, headDim).transposed(0, 2, 1, 3)
         let v4 = v.reshaped(1, kvLen, nHeads, headDim).transposed(0, 2, 1, 3)
 
-        let maskMode: MLXFast.ScaledDotProductAttentionMaskMode
-        if seqLen == 1 {
-            maskMode = .none
-        } else if cache == nil && seqLen <= slidingWindow {
-            maskMode = .causal
-        } else {
-            let qPos = positions.expandedDimensions(axis: 1)
-            let kPos = MLXArray(positionOffset..<(positionOffset + kvLen)).asType(.int32).expandedDimensions(axis: 0)
-            let causal = kPos .<= qPos
-            let window = kPos .>= (qPos - MLXArray(Int32(slidingWindow - 1)))
-            let allowed = logicalAnd(causal, window)
-            // Match the activation dtype: a float32 mask over fp16 q/k aborts SDPA.
-            let mask = MLX.where(allowed, MLXArray(0.0), MLXArray(-1e9)).asType(q.dtype)
-            maskMode = .array(mask)
-        }
-
         let attn = MLXFast.scaledDotProductAttention(
             queries: q4,
             keys: k4,
             values: v4,
             scale: scale,
-            mask: maskMode
+            mask: inputs.mask
         )
 
         let out = attn.transposed(0, 2, 1, 3).reshaped(seqLen, nHeads * headDim)
@@ -213,13 +271,13 @@ final class VoxtralRealtimeEncoderLayer: Module {
 
     func callAsFunction(
         _ x: MLXArray,
-        positions: MLXArray,
+        inputs: VoxtralRealtimeEncoderAttentionInputs,
         cache: VoxtralRealtimeEncoderKVCache?
     ) -> (MLXArray, VoxtralRealtimeEncoderKVCache) {
         var out = x
 
         var h = attentionNorm(out)
-        let attnOut = attention(h, positions: positions, cache: cache)
+        let attnOut = attention(h, inputs: inputs, cache: cache)
         h = attnOut.0
         out = out + h
 
@@ -287,6 +345,26 @@ final class VoxtralRealtimeAudioEncoder: Module {
         return x
     }
 
+    /// Shared per-pass attention inputs (RoPE tables + mask) for `seqLen` frames
+    /// at `positions`, extending `caches` — see
+    /// `VoxtralRealtimeEncoderAttentionInputs`.
+    private func attentionInputs(
+        positions: MLXArray,
+        seqLen: Int,
+        caches: [VoxtralRealtimeEncoderKVCache?],
+        dtype: DType
+    ) -> VoxtralRealtimeEncoderAttentionInputs {
+        VoxtralRealtimeEncoderAttentionInputs.build(
+            positions: positions,
+            seqLen: seqLen,
+            caches: caches,
+            slidingWindow: config.slidingWindow,
+            headDim: config.headDim,
+            ropeTheta: config.ropeTheta,
+            dtype: dtype
+        )
+    }
+
     /// Incremental counterpart of `convStem`: consume new mel columns
     /// (`[nMels, nNew]`) and return every conv-stem row (`[nNewRows, dim]`) they
     /// complete, matching the rows `convStem` produces at the same absolute indices.
@@ -330,10 +408,12 @@ final class VoxtralRealtimeAudioEncoder: Module {
     func encodeFull(_ convOut: MLXArray) -> MLXArray {
         let seqLen = convOut.shape[0]
         let positions = MLXArray(0..<seqLen).asType(.int32)
+        let inputs = attentionInputs(
+            positions: positions, seqLen: seqLen, caches: [], dtype: convOut.dtype)
 
         var x = convOut
         for layer in transformerLayers {
-            x = layer(x, positions: positions, cache: nil).0
+            x = layer(x, inputs: inputs, cache: nil).0
         }
 
         x = transformerNorm(x)
@@ -356,9 +436,14 @@ final class VoxtralRealtimeAudioEncoder: Module {
             let chunkEnd = min(chunkStart + sw, seqLen)
             var x = convOut[chunkStart..<chunkEnd, 0...]
             let positions = MLXArray(chunkStart..<chunkEnd).asType(.int32)
+            // Per-chunk, not per-pass: the caches' offset/history advance between
+            // chunks, so these inputs cannot be hoisted out of this loop.
+            let inputs = attentionInputs(
+                positions: positions, seqLen: chunkEnd - chunkStart, caches: caches,
+                dtype: x.dtype)
 
             for i in transformerLayers.indices {
-                let next = transformerLayers[i](x, positions: positions, cache: caches[i])
+                let next = transformerLayers[i](x, inputs: inputs, cache: caches[i])
                 x = next.0
                 caches[i] = next.1
             }
@@ -383,8 +468,10 @@ final class VoxtralRealtimeAudioEncoder: Module {
     ) -> MLXArray {
         var x = convBlock
         let positions = MLXArray(startPos..<(startPos + convBlock.shape[0])).asType(.int32)
+        let inputs = attentionInputs(
+            positions: positions, seqLen: convBlock.shape[0], caches: caches, dtype: x.dtype)
         for i in transformerLayers.indices {
-            let next = transformerLayers[i](x, positions: positions, cache: caches[i])
+            let next = transformerLayers[i](x, inputs: inputs, cache: caches[i])
             x = next.0
             caches[i] = next.1
         }

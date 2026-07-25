@@ -675,10 +675,13 @@ public extension VoxtralRealtimeModel {
     }
 
     func shouldQuantize(path: String) -> Bool {
+        // tok_embeddings is deliberately not skipped: the loader's quantize pass is
+        // gated on the checkpoint shipping "<path>.scales", so checkpoints with a
+        // quantized tied embedding load directly while fp16-embedding checkpoints
+        // are structured exactly as before.
         let skipPatterns = [
             "norm",
             "ada_rms_norm",
-            "tok_embeddings",
             "conv_layers",
             "audio_language_projection",
         ]

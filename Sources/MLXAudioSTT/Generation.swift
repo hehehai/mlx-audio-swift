@@ -13,8 +13,11 @@ public struct STTGenerateParameters: Sendable {
     public let minChunkDuration: Float
     public let repetitionPenalty: Float
     public let repetitionContextSize: Int
+    /// KV-cache quantization bits; `nil` keeps model precision.
     public let kvBits: Int?
+    /// Group size for KV-cache quantization.
     public let kvGroupSize: Int
+    /// Cache offset that must be exceeded before the KV cache is quantized.
     public let quantizedKVStart: Int
 
     public init(

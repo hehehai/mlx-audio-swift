@@ -909,7 +909,7 @@ public class Qwen3ASRTextModel: Module {
             fatalError("Either inputIds or inputsEmbeds must be provided")
         }
 
-        let mask = createAttentionMask(h: h, cache: cache?.first)
+        let mask = Self.attentionMask(h: h, cache: cache?.first)
 
         let caches = cache ?? [KVCache?](repeating: nil, count: layers.count)
         for (i, layer) in layers.enumerated() {
@@ -917,6 +917,24 @@ public class Qwen3ASRTextModel: Module {
         }
 
         return norm(h)
+    }
+
+    /// Multi-token steps over a quantized cache need an exact additive mask:
+    /// the quantized attention path replaces boolean-mask positions with a
+    /// finite constant, letting future positions leak into the softmax.
+    static func attentionMask(
+        h: MLXArray, cache: KVCache?
+    ) -> MLXFast.ScaledDotProductAttentionMaskMode {
+        let n = h.dim(1)
+        if n > 1, let cache, cache is QuantizedKVCacheProtocol {
+            let offset = cache.offset
+            let boolMask = createCausalMask(n: n, offset: offset)
+            let additive = MLX.where(
+                boolMask, MLXArray(Float(0)), MLXArray(Float(-1e9))
+            ).asType(h.dtype)
+            return .array(additive)
+        }
+        return createAttentionMask(h: h, cache: cache)
     }
 }
 
