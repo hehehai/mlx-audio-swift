@@ -225,7 +225,7 @@ public final class MossTranscribeDiarizeBackbone: Module {
         var embeds = inputsEmbeds ?? languageModel.embedTokens(inputIds)
         if let inputFeatures,
            let audioFeatureLengths,
-           cache == nil || cache?.first == nil || (cache?.first as? KVCacheSimple)?.offset == 0 {
+           cache == nil || cache?.first == nil || cache?.first?.offset == 0 {
             embeds = try! injectAudioFeatures(
                 inputIds: inputIds,
                 inputsEmbeds: embeds,
@@ -317,7 +317,10 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration,
             repetitionPenalty: generationParameters.repetitionPenalty,
-            repetitionContextSize: generationParameters.repetitionContextSize
+            repetitionContextSize: generationParameters.repetitionContextSize,
+            kvBits: generationParameters.kvBits,
+            kvGroupSize: generationParameters.kvGroupSize,
+            quantizedKVStart: generationParameters.quantizedKVStart
         )
     }
 
@@ -355,7 +358,10 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
                             repetitionPenalty: generationParameters.repetitionPenalty,
                             repetitionContextSize: generationParameters.repetitionContextSize,
                             prompt: nil,
-                            offsetSeconds: Double(offsetSeconds)
+                            offsetSeconds: Double(offsetSeconds),
+                            kvBits: generationParameters.kvBits,
+                            kvGroupSize: generationParameters.kvGroupSize,
+                            quantizedKVStart: generationParameters.quantizedKVStart
                         ) { text in
                             guard !text.isEmpty else { return }
                             if !emittedText {
@@ -404,7 +410,10 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
         minChunkDuration: Float = 0.0,
         repetitionPenalty: Float = 1.0,
         repetitionContextSize: Int = 100,
-        prompt: String? = nil
+        prompt: String? = nil,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> STTOutput {
         let start = Date()
         do {
@@ -426,7 +435,10 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
                     repetitionPenalty: repetitionPenalty,
                     repetitionContextSize: repetitionContextSize,
                     prompt: prompt,
-                    offsetSeconds: Double(offsetSeconds)
+                    offsetSeconds: Double(offsetSeconds),
+                    kvBits: kvBits,
+                    kvGroupSize: kvGroupSize,
+                    quantizedKVStart: quantizedKVStart
                 )
                 outputs.append(output)
                 Memory.clearCache()
@@ -620,6 +632,9 @@ private extension MossTranscribeDiarizeModel {
         repetitionContextSize: Int,
         prompt: String?,
         offsetSeconds: Double,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0,
         onText: ((String) -> Void)? = nil
     ) throws -> STTOutput {
         defer { Memory.clearCache() }
@@ -636,7 +651,10 @@ private extension MossTranscribeDiarizeModel {
             maxTokens: maxTokens,
             temperature: temperature,
             repetitionPenalty: repetitionPenalty,
-            repetitionContextSize: repetitionContextSize
+            repetitionContextSize: repetitionContextSize,
+            kvBits: kvBits,
+            kvGroupSize: kvGroupSize,
+            quantizedKVStart: quantizedKVStart
         ) { token in
             let rawDelta = self.tokenizer?.decode(tokens: [token], skipSpecialTokens: true) ?? ""
             let shiftedDelta = offsetter.consume(rawDelta)
@@ -682,10 +700,15 @@ private extension MossTranscribeDiarizeModel {
         temperature: Float,
         repetitionPenalty: Float,
         repetitionContextSize: Int,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0,
         onToken: ((Int) -> Void)? = nil
     ) throws -> [Int] {
-        let cache = makeCache()
-        let prefillStepSize = 2048
+        var cache = makeCache()
+        // Quantized prefill attention is unfused; its transient scores tensor
+        // scales with chunk size, so a smaller chunk bounds the memory spike.
+        let prefillStepSize = kvBits == nil ? 2048 : 512
         let totalTokens = promptIds.dim(1)
         var processedTokens = 0
 
@@ -698,6 +721,14 @@ private extension MossTranscribeDiarizeModel {
             let chunkEmbeds = inputEmbeddings[0..., processedTokens..<(processedTokens + n), 0...]
             let logits = callAsFunction(inputIds: chunkIds, inputEmbeddings: chunkEmbeds, cache: cache)
             eval(logits)
+            // Quantize retained context as prefill progresses (as mlx-lm does):
+            // a long prompt would otherwise peak at full-precision KV.
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
+            )
             Memory.clearCache()
             processedTokens += n
         }
@@ -711,6 +742,14 @@ private extension MossTranscribeDiarizeModel {
         }
         var nextTokenArray = lastLogits.argMax(axis: -1)
         asyncEval(nextTokenArray)
+
+        // Covers prompts short enough that the chunk loop never ran.
+        maybeQuantizeKVCache(
+            cache: &cache,
+            kvBits: kvBits,
+            kvGroupSize: kvGroupSize,
+            quantizedKVStart: quantizedKVStart
+        )
 
         var generated: [Int] = []
         let eos = eosTokenIds()
@@ -1010,6 +1049,19 @@ extension MossTranscribeDiarizeModel {
             weights.merge(shard) { _, new in new }
         }
         let sanitized = sanitize(weights: weights)
+        if config.quantization != nil || config.perLayerQuantization != nil {
+            quantize(model: model) { path, _ in
+                // Only layers shipping quantized tensors are swapped.
+                guard sanitized["\(path).scales"] != nil else {
+                    return nil
+                }
+                if let perLayerQuant = config.perLayerQuantization,
+                   let layerQuant = perLayerQuant.quantization(layer: path) {
+                    return layerQuant.asTuple
+                }
+                return config.quantization?.asTuple
+            }
+        }
         try model.update(parameters: ModuleParameters.unflattened(sanitized), verify: .all)
         model.train(false)
         eval(model)
