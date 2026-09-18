@@ -528,13 +528,10 @@ enum App {
         segments.reserveCapacity(raw.count)
 
         for item in raw {
-            guard let text = item["text"] as? String,
-                  let start = asDouble(item["start"]),
-                  let end = asDouble(item["end"])
-            else {
-                continue
-            }
-            segments.append(Segment(text: text, start: start, end: end))
+            guard let start = item.startTime,
+                  let end = item.endTime
+            else { continue }
+            segments.append(Segment(text: item.text, start: start, end: end))
         }
 
         return segments.isEmpty ? nil : segments
@@ -648,23 +645,6 @@ private func asFloat(_ value: Any?) -> Float? {
         return v.floatValue
     case let v as String:
         return Float(v)
-    default:
-        return nil
-    }
-}
-
-private func asDouble(_ value: Any?) -> Double? {
-    switch value {
-    case let v as Double:
-        return v
-    case let v as Float:
-        return Double(v)
-    case let v as Int:
-        return Double(v)
-    case let v as NSNumber:
-        return v.doubleValue
-    case let v as String:
-        return Double(v)
     default:
         return nil
     }

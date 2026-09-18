@@ -4,23 +4,40 @@
 name: Run Tests
 
 on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
   pull_request:
     branches:
       - main
 
 jobs:
   tests:
-    runs-on: macos-latest
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Select Xcode version
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: 'latest'
+      - uses: actions/checkout@v5
+      - name: Verify Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          xcrun swift --version
       - name: Install Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
+      - name: Resolve upgraded dependencies
+        run: xcodebuild -resolvePackageDependencies -scheme MLXAudio-Package -skipPackagePluginValidation
+      - name: Preserve resolved graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlx-audio-resolved-dependencies
+          path: |
+            Package.resolved
+            .swiftpm/xcode/package.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Build
-        run: xcodebuild build-for-testing -scheme MLXAudio-Package -destination 'platform=macOS' MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild build-for-testing -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO
       - name: Run tests
-        run: xcodebuild test-without-building -scheme MLXAudio-Package -destination 'platform=macOS' -skip-testing:'MLXAudioTests/SmokeTests' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild test-without-building -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation -skip-testing:'MLXAudioTests/SmokeTests' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO

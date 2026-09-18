@@ -60,6 +60,16 @@ public struct StreamingConfig: Sendable {
     public var maxDecodeWindows: Int
     /// Whether to run a one-shot decode on each completed 8s window for accuracy
     public var finalizeCompletedWindows: Bool
+    /// Optional model prompt override. Models that do not support prompting ignore it.
+    public var prompt: String?
+    /// Optional punctuation and capitalization override. Models without task-token support ignore it.
+    public var usePunctuation: Bool?
+    /// Optional KV cache quantization bit width for Qwen decoding.
+    public var kvBits: Int?
+    /// Quantization group size for Qwen KV caches.
+    public var kvGroupSize: Int
+    /// Prompt length threshold before Qwen KV caches are quantized.
+    public var quantizedKVStart: Int
 
     public init(
         decodeIntervalSeconds: Double = 1.0,
@@ -74,7 +84,12 @@ public struct StreamingConfig: Sendable {
         minAgreementPasses: Int = 2,
         boundaryMinAgreementPasses: Int = 3,
         maxDecodeWindows: Int = 1,
-        finalizeCompletedWindows: Bool = true
+        finalizeCompletedWindows: Bool = true,
+        prompt: String? = nil,
+        usePunctuation: Bool? = nil,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) {
         self.decodeIntervalSeconds = decodeIntervalSeconds
         self.boundaryDecodeIntervalSeconds = boundaryDecodeIntervalSeconds
@@ -89,6 +104,11 @@ public struct StreamingConfig: Sendable {
         self.boundaryMinAgreementPasses = boundaryMinAgreementPasses
         self.maxDecodeWindows = maxDecodeWindows
         self.finalizeCompletedWindows = finalizeCompletedWindows
+        self.prompt = prompt
+        self.usePunctuation = usePunctuation
+        self.kvBits = kvBits
+        self.kvGroupSize = kvGroupSize
+        self.quantizedKVStart = quantizedKVStart
     }
 }
 
@@ -104,8 +124,25 @@ public enum TranscriptionEvent: Sendable {
     case displayUpdate(confirmedText: String, provisionalText: String)
     /// Performance statistics
     case stats(StreamingStats)
-    /// Session has ended with final text
-    case ended(fullText: String)
+    /// Session terminated because inference failed
+    case failed(StreamingFailure)
+    /// Session has ended with the final structured transcription output.
+    ///
+    /// `output.text` is always the session transcript. Models that expose timing,
+    /// language, or speaker metadata populate the corresponding `STTOutput` fields
+    /// with the same semantics as their batch `generate` / `generateStream` paths.
+    case ended(STTOutput)
+}
+
+/// A sendable failure value emitted by a streaming inference session.
+public struct StreamingFailure: Error, Sendable, Equatable, LocalizedError {
+    public let message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+
+    public var errorDescription: String? { message }
 }
 
 // MARK: - Streaming Stats

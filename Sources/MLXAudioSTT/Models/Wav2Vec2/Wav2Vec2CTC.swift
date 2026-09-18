@@ -433,6 +433,8 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
     public let config: Wav2Vec2STTConfig
     public var vocabularies: [String: [Int: String]]
     public var defaultVocabulary: [Int: String]
+    public private(set) var activeAdapterLanguage: String?
+    private var modelDirectory: URL?
 
     @ModuleInfo public var wav2vec2: Wav2Vec2STTModel
     @ModuleInfo(key: "lm_head") public var lmHead: Linear
@@ -449,6 +451,8 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         self.config = config
         self.defaultVocabulary = vocabulary
         self.vocabularies = vocabularies
+        self.activeAdapterLanguage = nil
+        self.modelDirectory = nil
         _wav2vec2.wrappedValue = Wav2Vec2STTModel(config: config)
         _lmHead.wrappedValue = Linear(config.hiddenSize, config.vocabSize)
         super.init()
@@ -476,8 +480,9 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
 
         return STTOutput(
             text: text,
-            segments: [["text": text, "start": 0.0, "end": 0.0]],
+            segments: [STTTranscriptSegment(text: text)],
             language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .unknown : .requested,
             generationTokens: tokenIds.first?.count ?? 0,
             totalTokens: tokenIds.first?.count ?? 0,
             generationTps: Double(tokenIds.first?.count ?? 0) / max(totalTime, 0.001),
@@ -511,10 +516,45 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         guard let language, !language.isEmpty else {
             return defaultVocabulary
         }
-        let key = language.lowercased()
-        return vocabularies[key]
-            ?? vocabularies[Self.iso3LanguageAlias(key)]
-            ?? defaultVocabulary
+        guard let key = Self.resolvedLanguageKey(language, availableKeys: Array(vocabularies.keys)) else {
+            return defaultVocabulary
+        }
+        return vocabularies[key] ?? defaultVocabulary
+    }
+
+    /// Loads the matching MMS language adapter and selects its vocabulary.
+    /// Plain Wav2Vec2 checkpoints without adapters only update the vocabulary.
+    public func selectLanguage(_ language: String) throws {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            throw STTError.invalidInput("Wav2Vec2/MMS language must not be empty")
+        }
+
+        if let key = Self.resolvedLanguageKey(normalized, availableKeys: Array(vocabularies.keys)),
+           let vocabulary = vocabularies[key] {
+            defaultVocabulary = vocabulary
+        } else if !vocabularies.isEmpty {
+            throw STTError.invalidInput("No Wav2Vec2/MMS vocabulary found for language: \(language)")
+        }
+
+        guard let modelDirectory else {
+            return
+        }
+        let adapters = adapterURLs(in: modelDirectory)
+        guard !adapters.isEmpty else {
+            return
+        }
+        guard let adapterURL = selectAdapter(from: adapters, language: normalized) else {
+            throw STTError.invalidInput("No MMS adapter found for language: \(language)")
+        }
+        let adapterLanguage = adapterLanguage(from: adapterURL)
+        guard activeAdapterLanguage != adapterLanguage else { return }
+
+        let adapterWeights = try MLX.loadArrays(url: adapterURL)
+        let sanitizedAdapter = Self.sanitize(weights: adapterWeights)
+        try update(parameters: ModuleParameters.unflattened(sanitizedAdapter), verify: Module.VerifyUpdate.noUnusedKeys)
+        activeAdapterLanguage = adapterLanguage
+        eval(self)
     }
 
     public static func greedyCTCTokens(logits: MLXArray, blankTokenId: Int = 0) -> [[Int]] {
@@ -582,15 +622,17 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
             vocabulary: selectDefaultVocabulary(from: vocabStore, language: language),
             vocabularies: vocabStore
         )
+        model.modelDirectory = modelDir
 
         let weights = try loadSafetensorWeights(from: modelDir, includeAdapters: false)
         let sanitized = sanitize(weights: weights)
         try model.update(parameters: ModuleParameters.unflattened(sanitized), verify: Module.VerifyUpdate.noUnusedKeys)
 
-        if let adapterURL = selectAdapter(in: modelDir, language: language) {
+        if let adapterURL = selectAdapter(from: adapterURLs(in: modelDir), language: language) {
             let adapterWeights = try MLX.loadArrays(url: adapterURL)
             let sanitizedAdapter = sanitize(weights: adapterWeights)
             try model.update(parameters: ModuleParameters.unflattened(sanitizedAdapter), verify: Module.VerifyUpdate.noUnusedKeys)
+            model.activeAdapterLanguage = adapterLanguage(from: adapterURL)
         }
 
         model.train(false)
@@ -621,6 +663,21 @@ public final class Wav2Vec2CTCModel: Module, STTGenerationModel {
         default:
             return language
         }
+    }
+
+    fileprivate static func resolvedLanguageKey(_ language: String, availableKeys: [String]) -> String? {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let candidates = [normalized, iso3LanguageAlias(normalized)]
+        for candidate in candidates {
+            if availableKeys.contains(candidate) {
+                return candidate
+            }
+            let scriptMatches = availableKeys.filter { $0.hasPrefix("\(candidate)-script_") }
+            if scriptMatches.count == 1 {
+                return scriptMatches[0]
+            }
+        }
+        return nil
     }
 }
 
@@ -704,26 +761,25 @@ private func loadSafetensorWeights(from modelDir: URL, includeAdapters: Bool) th
     return weights
 }
 
-private func selectAdapter(in modelDir: URL, language: String?) -> URL? {
+private func adapterURLs(in modelDir: URL) -> [URL] {
     let files = (try? FileManager.default.contentsOfDirectory(at: modelDir, includingPropertiesForKeys: nil)) ?? []
-    let adapters = files
+    return files
         .filter { $0.pathExtension == "safetensors" && $0.lastPathComponent.hasPrefix("adapter.") }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
-    guard !adapters.isEmpty else { return nil }
+}
 
-    let languageKeys: [String]
-    if let language, !language.isEmpty {
-        let lower = language.lowercased()
-        languageKeys = [lower, Wav2Vec2CTCModel.iso3LanguageAlias(lower)]
-    } else {
-        languageKeys = ["eng", "en"]
+private func adapterLanguage(from url: URL) -> String {
+    url.deletingPathExtension().lastPathComponent.replacingOccurrences(of: "adapter.", with: "")
+}
+
+private func selectAdapter(from adapters: [URL], language: String?) -> URL? {
+    guard !adapters.isEmpty else { return nil }
+    let requestedLanguage = (language?.isEmpty == false ? language : nil) ?? "eng"
+    let availableLanguages = adapters.map(adapterLanguage(from:))
+    if let key = Wav2Vec2CTCModel.resolvedLanguageKey(requestedLanguage, availableKeys: availableLanguages) {
+        return adapters.first(where: { adapterLanguage(from: $0) == key })
     }
-    for key in languageKeys {
-        if let match = adapters.first(where: { $0.lastPathComponent == "adapter.\(key).safetensors" }) {
-            return match
-        }
-    }
-    return adapters.first
+    return language == nil ? adapters.first : nil
 }
 
 private func loadVocabularies(from modelDir: URL) throws -> [String: [Int: String]] {
@@ -747,11 +803,10 @@ private func loadVocabularies(from modelDir: URL) throws -> [String: [Int: Strin
 }
 
 private func selectDefaultVocabulary(from store: [String: [Int: String]], language: String?) -> [Int: String] {
-    if let language, !language.isEmpty {
-        let lower = language.lowercased()
-        if let vocab = store[lower] ?? store[Wav2Vec2CTCModel.iso3LanguageAlias(lower)] {
-            return vocab
-        }
+    if let language, !language.isEmpty,
+       let key = Wav2Vec2CTCModel.resolvedLanguageKey(language, availableKeys: Array(store.keys)),
+       let vocabulary = store[key] {
+        return vocabulary
     }
     return store["eng"] ?? store["en"] ?? store["default"] ?? store.values.first ?? [:]
 }

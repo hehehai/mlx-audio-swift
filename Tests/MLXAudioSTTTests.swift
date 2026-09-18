@@ -50,7 +50,9 @@
 import Foundation
 import Testing
 import MLX
+import MLXLMCommon
 import MLXNN
+import MLXLMCommon
 
 @testable import MLXAudioCore
 @testable import MLXAudioSTT
@@ -420,6 +422,7 @@ struct GLMASRModuleSetupTests {
         #expect(output.text == "Test")
         #expect(output.segments == nil)
         #expect(output.language == nil)
+        #expect(output.languageProvenance == .unknown)
         #expect(output.promptTokens == 0)
         #expect(output.generationTokens == 0)
         #expect(output.totalTokens == 0)
@@ -442,6 +445,36 @@ struct GLMASRModuleSetupTests {
         #expect(description.contains("50"))
         #expect(description.contains("25"))
         #expect(description.contains("75"))
+    }
+
+    @Test func typedTranscriptSegmentRoundTripsThroughCodable() throws {
+        let segment = STTTranscriptSegment(
+            text: "Hello",
+            startTime: 1.25,
+            endTime: 2.5,
+            speakerID: "S01",
+            language: "en",
+            confidence: 0.91,
+            emotion: "neutral",
+            event: "speech"
+        )
+
+        let encoded = try JSONEncoder().encode(segment)
+        let decoded = try JSONDecoder().decode(STTTranscriptSegment.self, from: encoded)
+
+        #expect(decoded == segment)
+        #expect(decoded.hasTiming)
+    }
+
+    @Test func sttOutputPreservesLanguageProvenance() {
+        let output = STTOutput(
+            text: "Hello",
+            language: "en",
+            languageProvenance: .outputTarget
+        )
+
+        #expect(output.language == "en")
+        #expect(output.languageProvenance == .outputTarget)
     }
 
     // MARK: - Config Decoding Tests
@@ -734,11 +767,29 @@ struct Wav2Vec2CTCSTTTests {
             vocabularies: [
                 "eng": [1: "h", 2: "|", 3: "i"],
                 "fra": [1: "s", 2: "|", 3: "a"],
+                "cmn-script_simplified": [1: "你", 2: "|", 3: "好"],
             ]
         )
 
         #expect(model.decode(tokens: [1, 2, 3], language: "en") == "h i")
         #expect(model.decode(tokens: [1, 2, 3], language: "fra") == "s a")
+
+        try! model.selectLanguage("fr")
+        #expect(model.activeAdapterLanguage == nil)
+        #expect(model.decode(tokens: [1, 2, 3]) == "s a")
+        try! model.selectLanguage("cmn")
+        #expect(model.decode(tokens: [1, 2, 3]) == "你 好")
+    }
+
+    @Test func languageSelectionRejectsMissingVocabulary() {
+        let model = Wav2Vec2CTCModel(
+            config: Wav2Vec2STTConfig(vocabSize: 4),
+            vocabularies: ["eng": [1: "h"]]
+        )
+
+        #expect(throws: (any Error).self) {
+            try model.selectLanguage("jpn")
+        }
     }
 
     @Test func tinyForwardProducesCTCLogits() {
@@ -1031,6 +1082,7 @@ struct CanarySTTTests {
         <|en|> 13
         <|de|> 14
         <|pnc|> 15
+        <|nopnc|> 20
         <|noitn|> 16
         <|notimestamp|> 17
         <|nodiarize|> 18
@@ -1043,8 +1095,15 @@ struct CanarySTTTests {
         let loadedTokenizer = try CanaryTokenizer.fromModelDirectory(dir, config: config)
         let tokenizer = try #require(loadedTokenizer)
         let prompt = tokenizer.buildPromptTokens(config: config, sourceLanguage: "en", targetLanguage: "de")
+        let noPunctuationPrompt = tokenizer.buildPromptTokens(
+            config: config,
+            sourceLanguage: "de",
+            targetLanguage: "en",
+            usePunctuationAndCapitalization: false
+        )
 
         #expect(prompt == [10, 11, 12, 13, 14, 15, 16, 17, 18])
+        #expect(noPunctuationPrompt == [10, 11, 12, 14, 13, 20, 16, 17, 18])
         #expect(tokenizer.eosTokenId(config: config) == 19)
         #expect(tokenizer.decode([5]) == "Hallo")
     }
@@ -1578,6 +1637,25 @@ struct Qwen3ASRModuleSetupTests {
         #expect(output.shape == [batchSize, seqLen, config.hiddenSize])
     }
 
+    @Test func qwen3TextAttentionSupportsQuantizedKVCache() {
+        let config = Qwen3TextConfig(
+            hiddenSize: 256,
+            numHiddenLayers: 2,
+            numAttentionHeads: 4,
+            numKeyValueHeads: 2,
+            headDim: 64
+        )
+        let attention = Qwen3ASRTextAttention(config, layerIdx: 0)
+        let cache = QuantizedKVCache(groupSize: 32, bits: 8)
+        let hiddenStates = MLXArray.ones([1, 8, config.hiddenSize])
+
+        let output = attention(hiddenStates, mask: .none, cache: cache)
+        eval(output)
+
+        #expect(output.shape == [1, 8, config.hiddenSize])
+        #expect(cache.offset == 8)
+    }
+
     @Test func qwen3TextDecoderLayerShape() {
         let config = Qwen3TextConfig(
             hiddenSize: 256,
@@ -1739,10 +1817,66 @@ struct Qwen3ASRModuleSetupTests {
         #expect(parsed.text == "hello world")
     }
 
+    @Test func qwen3ASRStreamingHidesIncompleteAutomaticLanguagePrefix() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig())
+
+        #expect(model.streamingVisibleText(from: "lang", forcedLanguage: nil).isEmpty)
+        #expect(model.streamingVisibleText(from: "language Chinese<asr_", forcedLanguage: nil).isEmpty)
+        #expect(
+            model.streamingVisibleText(
+                from: "language Chinese<asr_text>你好",
+                forcedLanguage: nil
+            ) == "你好"
+        )
+        #expect(
+            model.streamingVisibleText(
+                from: "language English<asr_text>language models",
+                forcedLanguage: nil
+            ) == "language models"
+        )
+    }
+
+    @Test func qwen3ASRStreamingSplitsVisibleConfirmedAndProvisionalTextAcrossProtocolBoundary() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig())
+
+        let parts = model.streamingVisibleTextParts(
+            confirmedDecodedText: "language Chinese<asr_",
+            combinedDecodedText: "language Chinese<asr_text>你好",
+            forcedLanguage: nil
+        )
+
+        #expect(parts.confirmedText.isEmpty)
+        #expect(parts.provisionalText == "你好")
+    }
+
+    @Test func qwen3ASRStreamingKeepsForcedLanguageTextVerbatim() {
+        let model = Qwen3ASRModel(Qwen3ASRConfig(supportLanguages: ["Chinese"]))
+
+        #expect(
+            model.streamingVisibleText(
+                from: "language Chinese is metadata",
+                forcedLanguage: "Chinese"
+            ) == "language Chinese is metadata"
+        )
+    }
+
     @Test func qwen3ASRMergeLanguagesDeduplicatesInOrder() {
         let merged = Qwen3ASRModel.mergeLanguages(["Chinese", "", "English", "Chinese", nil])
 
         #expect(merged == "Chinese,English")
+    }
+
+    @Test func typedQwenSegmentCarriesTimelineAndDetectedLanguage() {
+        let segment = STTTranscriptSegment(
+            text: "hello",
+            startTime: 2,
+            endTime: 4.5,
+            language: "English"
+        )
+
+        #expect(segment.hasTiming)
+        #expect(segment.language == "English")
+        #expect(segment.endTime == 4.5)
     }
 
     @Test func qwen3ForcedAlignerModelConstruction() {
@@ -1789,6 +1923,38 @@ struct Qwen3ASRModuleSetupTests {
         let cache = model.makeCache()
 
         #expect(cache.count == 4)
+    }
+
+    @Test func sttGenerateParametersExposeKVCacheQuantization() {
+        let defaults = STTGenerateParameters()
+        #expect(defaults.kvBits == nil)
+        #expect(defaults.kvGroupSize == 64)
+        #expect(defaults.quantizedKVStart == 0)
+
+        let quantized = STTGenerateParameters(
+            kvBits: 4,
+            kvGroupSize: 32,
+            quantizedKVStart: 256
+        )
+        #expect(quantized.kvBits == 4)
+        #expect(quantized.kvGroupSize == 32)
+        #expect(quantized.quantizedKVStart == 256)
+    }
+
+    @Test func streamingConfigExposesKVCacheQuantization() {
+        let defaults = StreamingConfig()
+        #expect(defaults.kvBits == nil)
+        #expect(defaults.kvGroupSize == 64)
+        #expect(defaults.quantizedKVStart == 0)
+
+        let quantized = StreamingConfig(
+            kvBits: 8,
+            kvGroupSize: 32,
+            quantizedKVStart: 256
+        )
+        #expect(quantized.kvBits == 8)
+        #expect(quantized.kvGroupSize == 32)
+        #expect(quantized.quantizedKVStart == 256)
     }
 
     // MARK: - Weight Sanitization Tests
@@ -1852,6 +2018,18 @@ struct Qwen3ASRModuleSetupTests {
 }
 
 struct MossTranscribeDiarizeModuleSetupTests {
+
+    @Test func streamingFailurePreservesLocalizedMessage() {
+        let failure = StreamingFailure(message: "decode failed")
+        #expect(failure.localizedDescription == "decode failed")
+        #expect(failure == StreamingFailure(message: "decode failed"))
+    }
+
+    @Test func streamingConfigurationCarriesPromptOverride() {
+        let config = StreamingConfig(prompt: "Transcribe using speaker labels.")
+
+        #expect(config.prompt == "Transcribe using speaker labels.")
+    }
 
     @Test func mossConfigDefaults() throws {
         let config = MossTranscribeDiarizeConfig()
@@ -1928,11 +2106,11 @@ struct MossTranscribeDiarizeModuleSetupTests {
         let segments = MossTranscribeDiarizeModel.parseSegments(text: text, fallbackEnd: 10.0)
 
         #expect(segments.count == 2)
-        #expect(segments[0]["start"] as? Double == 0.48)
-        #expect(segments[0]["end"] as? Double == 1.66)
-        #expect(segments[0]["speaker_id"] as? String == "S01")
-        #expect(segments[0]["text"] as? String == "[S01] hello")
-        #expect(segments[1]["speaker_id"] as? String == "S02")
+        #expect(segments[0].startTime == 0.48)
+        #expect(segments[0].endTime == 1.66)
+        #expect(segments[0].speakerID == "S01")
+        #expect(segments[0].text == "hello")
+        #expect(segments[1].speakerID == "S02")
     }
 
     @Test func mossParseSegmentsAppliesChunkOffset() {
@@ -1945,9 +2123,9 @@ struct MossTranscribeDiarizeModuleSetupTests {
         )
 
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 30.48)
-        #expect(segments[0]["end"] as? Double == 31.66)
-        #expect(segments[0]["speaker_id"] as? String == "S01")
+        #expect(segments[0].startTime == 30.48)
+        #expect(segments[0].endTime == 31.66)
+        #expect(segments[0].speakerID == "S01")
     }
 
     @Test func mossOffsetTimestampTags() {
@@ -1966,8 +2144,8 @@ struct MossTranscribeDiarizeModuleSetupTests {
 
         #expect(shifted == "[30.48][S01]hello[31.66]")
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 30.48)
-        #expect(segments[0]["end"] as? Double == 31.66)
+        #expect(segments[0].startTime == 30.48)
+        #expect(segments[0].endTime == 31.66)
     }
 
     @Test func mossParseSegmentsFallback() {
@@ -1976,9 +2154,9 @@ struct MossTranscribeDiarizeModuleSetupTests {
         let segments = MossTranscribeDiarizeModel.parseSegments(text: text, fallbackEnd: 4.25)
 
         #expect(segments.count == 1)
-        #expect(segments[0]["start"] as? Double == 0.0)
-        #expect(segments[0]["end"] as? Double == 4.25)
-        #expect(segments[0]["text"] as? String == text)
+        #expect(segments[0].startTime == 0.0)
+        #expect(segments[0].endTime == 4.25)
+        #expect(segments[0].text == text)
     }
 
     @Test func mossConfigDecodesQuantization() throws {
@@ -2662,10 +2840,10 @@ struct ForcedAlignResultTests {
 
         let segments = result.segments
         #expect(segments.count == 2)
-        #expect(segments[0]["text"] as? String == "Hello")
-        #expect(segments[0]["start"] as? Double == 0.0)
-        #expect(segments[0]["end"] as? Double == 0.5)
-        #expect(segments[1]["text"] as? String == "world")
+        #expect(segments[0].text == "Hello")
+        #expect(segments[0].startTime == 0.0)
+        #expect(segments[0].endTime == 0.5)
+        #expect(segments[1].text == "world")
     }
 
     @Test func forcedAlignResultEmpty() {
@@ -3327,6 +3505,55 @@ struct NemotronASRTests {
         return model
     }
 
+    private func legacyConfigJSON() -> String {
+        """
+        {
+          "target": "nemo.collections.asr.models.rnnt_bpe_models.EncDecRNNTBPEModel",
+          "preprocessor": {
+            "sample_rate": 16000,
+            "features": 16,
+            "n_fft": 64,
+            "window_size": 0.004,
+            "window_stride": 0.002,
+            "dither": 0.0
+          },
+          "encoder": {
+            "feat_in": 16,
+            "n_layers": 1,
+            "d_model": 64,
+            "n_heads": 4,
+            "ff_expansion_factor": 2,
+            "subsampling_factor": 4,
+            "subsampling_conv_channels": 8,
+            "conv_kernel_size": 3,
+            "att_context_size": [[4, 1], [4, 0]]
+          },
+          "decoder": {
+            "blank_as_pad": true,
+            "prednet": {
+              "pred_hidden": 64,
+              "pred_rnn_layers": 1
+            },
+            "vocab_size": 6
+          },
+          "joint": {
+            "jointnet": {
+              "joint_hidden": 64,
+              "activation": "relu",
+              "encoder_hidden": 64,
+              "pred_hidden": 64
+            },
+            "num_classes": 6,
+            "vocabulary": ["<unk>", "▁hello", "▁world", "!", "a", "b"]
+          },
+          "quantization": {
+            "group_size": 64,
+            "bits": 8
+          }
+        }
+        """
+    }
+
     @Test func configDecodesPromptAndStreamingContext() throws {
         let config = try JSONDecoder().decode(NemotronASRConfig.self, from: Data(tinyConfigJSON().utf8))
         #expect(config.modelType == "nemotron_asr")
@@ -3334,6 +3561,66 @@ struct NemotronASRTests {
         #expect(config.encoder.attContextSize == [[4, 1]])
         #expect(config.prompt.promptDictionary["en-US"] == 0)
         #expect(config.defaultLanguage == "auto")
+    }
+
+    @Test func eventSessionMapsDelayPresetsToSupportedChunkLadder() {
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .realtime) == 160)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .agent) == 560)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .subtitle) == 1120)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .custom(ms: 300)) == 320)
+        #expect(NemotronASRStreamingSession.chunkMilliseconds(for: .custom(ms: 800)) == 560)
+    }
+
+    @Test func legacyConfigDecodesNestedNetworksWithoutPromptConditioning() throws {
+        let config = try JSONDecoder().decode(NemotronASRConfig.self, from: Data(legacyConfigJSON().utf8))
+
+        #expect(config.decoder.predHidden == 64)
+        #expect(config.decoder.predRnnLayers == 1)
+        #expect(config.joint.jointHidden == 64)
+        #expect(config.joint.encoderHidden == 64)
+        #expect(config.joint.predHidden == 64)
+        #expect(config.vocabulary == ["<unk>", "▁hello", "▁world", "!", "a", "b"])
+        #expect(config.defaultLanguage == "en")
+        #expect(config.defaultAttContextSize == [4, 1])
+        #expect(config.hasPromptConditioning == false)
+
+        guard mlxRuntimeEnabled else {
+            print("Skipping Nemotron ASR MLX runtime test. Set MLXAUDIO_ENABLE_MLX_RUNTIME_TESTS=1 to enable.")
+            return
+        }
+        let model = NemotronASRModel(config)
+        #expect(model.numPrompts == 0)
+        #expect(model.promptDictionary.isEmpty)
+        #expect(model.parameters().flattened().contains { key, _ in key.hasPrefix("prompt_kernel.") } == false)
+    }
+
+    @Test func legacyQuantizedPointwiseConvolutionSanitizesAsConv1dWeight() {
+        guard mlxRuntimeEnabled else {
+            print("Skipping Nemotron ASR MLX runtime test. Set MLXAUDIO_ENABLE_MLX_RUNTIME_TESTS=1 to enable.")
+            return
+        }
+        let pointwiseKey = "encoder.layers.0.conv.pointwise_conv1.weight"
+        let scalesKey = "encoder.layers.0.conv.pointwise_conv1.scales"
+        let biasesKey = "encoder.layers.0.conv.pointwise_conv1.biases"
+        let weights: [String: MLXArray] = [
+            pointwiseKey: MLXArray.zeros([128, 16], type: UInt32.self),
+            scalesKey: MLXArray.ones([128, 1], type: Float16.self),
+            biasesKey: MLXArray.zeros([128, 1], type: Float16.self),
+        ]
+
+        let quantization = BaseConfiguration.PerLayerQuantization(
+            quantization: BaseConfiguration.Quantization(groupSize: 64, bits: 8),
+            perLayerQuantization: [:]
+        )
+        let sanitized = NemotronASRModel.sanitize(
+            weights: weights,
+            quantization: quantization
+        )
+
+        #expect(sanitized[pointwiseKey]?.shape == [128, 1, 64])
+        #expect(sanitized[pointwiseKey]?.dtype == .float16)
+        #expect(sanitized[scalesKey] == nil)
+        #expect(sanitized[biasesKey] == nil)
     }
 
     @Test func chunkedLimitedMaskMatchesNeMoVisibility() {
@@ -3422,7 +3709,7 @@ struct NemotronASRTests {
         return text
     }
 
-    private func sessionText(_ model: NemotronASRModel, _ audio: MLXArray, feed: Int) -> (String, [Int]) {
+    private func sessionText(_ model: NemotronASRModel, _ audio: MLXArray, feed: Int) -> String {
         let samples = audio.asArray(Float.self)
         let session = model.makeStreamSession(language: "en-US")
         var i = 0
@@ -3432,7 +3719,7 @@ struct NemotronASRTests {
             i = e
         }
         _ = session.finish()
-        return (session.text, session.tokens)
+        return session.text
     }
 
     /// The incremental session, fed in small chunks, must reproduce the one-shot
@@ -3446,9 +3733,8 @@ struct NemotronASRTests {
         let model = try tinyModel()
         let audio = syntheticAudio(samples: 6000)
         let whole = try await wholeStreamText(model, audio)
-        let (sessioned, tokens) = sessionText(model, audio, feed: 200)
+        let sessioned = sessionText(model, audio, feed: 200)
         #expect(sessioned == whole)
-        #expect(tokens.isEmpty == false)  // random weights still emit non-blank tokens
     }
 
     /// Output must be invariant to feed granularity: tiny chunks == large chunks.
@@ -3459,8 +3745,8 @@ struct NemotronASRTests {
         }
         let model = try tinyModel()
         let audio = syntheticAudio(samples: 6000)
-        let (fine, _) = sessionText(model, audio, feed: 96)
-        let (coarse, _) = sessionText(model, audio, feed: 1500)
+        let fine = sessionText(model, audio, feed: 96)
+        let coarse = sessionText(model, audio, feed: 1500)
         #expect(fine == coarse)
     }
 }
@@ -3809,6 +4095,27 @@ struct FireRedASR2Tests {
         #expect(fbank.shape[1] == 80)
     }
 
+    @Test func fbankScalesClippedFloatInput() {
+        // Regression: extractFbank scales normalized float input by 32768
+        // unconditionally. An earlier version auto-detected the scale with
+        // `amplitude <= 1.0`, so float input that lossy decoders (AAC via
+        // AVFoundation) overshoot past 1.0 on clipped content skipped the
+        // scaling, and decoding silently collapsed (empty segments on iOS).
+        let base = MLXRandom.normal([16000]) * MLXArray(Float(0.1))
+        let clipped = base * MLXArray(Float(1.1)) // max amplitude > 1.0
+        eval(base, clipped)
+
+        let fbankBase = FireRedASR2Audio.extractFbank(base)
+        let fbankClipped = FireRedASR2Audio.extractFbank(clipped)
+
+        // Both must take the float path, so the clipped fbank differs only
+        // by the +2*log(1.1) energy offset, not by the x32768 scale jump.
+        let delta = (fbankClipped - fbankBase).mean()
+        eval(delta)
+        let expected = 2 * log(Float(1.1))
+        #expect(abs(delta.item(Float.self) - expected) < 0.05)
+    }
+
     @Test func tokenizerCleanup() {
         let tokenizer = FireRedASR2Tokenizer(vocabulary: ["<blank>", "\u{2581}Hello", "<sil>", "World"])
         let text = tokenizer.decode(tokenIds: [0, 1, 2, 3])
@@ -3859,6 +4166,52 @@ struct FireRedASR2Tests {
         #expect(sanitized["encoder.layer_stack.0.ffn1.net_1.weight"] != nil)
         #expect(sanitized["encoder.layer_stack.0.conv.pointwise_conv1.weight"]?.shape == [8, 3, 4])
         #expect(sanitized["decoder.tgt_word_prj.weight"]?.shape == [6, 8])
+    }
+
+    @Test func topKReturnsTopValuesDescending() {
+        let x1 = MLXArray([Float(0.1), 2.5, -1.0, 3.3, 0.7, 2.4, -0.5])
+        let (values1, indices1) = FireRedASR2TransformerDecoder.topK(x1, k: 3)
+        #expect(values1.asArray(Float.self) == [3.3, 2.5, 2.4])
+        #expect(indices1.asArray(Int32.self) == [3, 1, 5])
+
+        let x2 = MLXArray([Float(0.1), 2.5, -1.0, 3.3, 1.1, -2.0, 4.0, 0.0], [2, 4])
+        let (values2, indices2) = FireRedASR2TransformerDecoder.topK(x2, k: 2)
+        #expect(values2.asArray(Float.self) == [3.3, 2.5, 4.0, 1.1])
+        #expect(indices2.asArray(Int32.self) == [3, 1, 2, 0])
+    }
+
+    @Test func beamSearchMatchesBaselineOutput() {
+        MLXRandom.seed(42)
+        let config = FireRedASR2Config(
+            odim: 32,
+            dModel: 16,
+            encoder: FireRedASR2EncoderConfig(
+                nLayers: 1, nHead: 4, dModel: 16, kernelSize: 15, peMaxlen: 128),
+            decoder: FireRedASR2DecoderConfig(
+                nLayers: 2, nHead: 4, dModel: 16, peMaxlen: 128)
+        )
+        let model = FireRedASR2Model(config)
+        eval(model)
+
+        let encoderOutput = MLXRandom.normal([1, 12, 16])
+        let (sequence, confidences) = model.decoder.beamSearch(
+            encoderOutput: encoderOutput, beamSize: 3)
+
+        // Pinned output of the corrected beam search (topK per-row gather).
+        // The pre-fix implementation scored every beam's candidates with
+        // beam 0's logits and produced eight 3s followed by EOS padding.
+        // Finished beams keep appending EOS (id 4) with confidence 1.0
+        // until maxDecode, so pin the prefix plus the EOS tail.
+        let expectedPrefix: [Int32] = [3, 3, 1, 14, 9, 4, 4, 4]
+        #expect(Array(sequence.prefix(expectedPrefix.count)) == expectedPrefix)
+        #expect(sequence.dropFirst(expectedPrefix.count).allSatisfy { $0 == 4 })
+        let expectedConfidences: [Float] = [
+            0.10417141, 0.09205305, 0.07174433, 0.07743147,
+            0.08286833, 0.058846395,
+        ]
+        #expect(zip(confidences.prefix(expectedConfidences.count), expectedConfidences)
+            .allSatisfy { abs($0 - $1) < 1e-5 })
+        #expect(confidences.dropFirst(expectedConfidences.count).allSatisfy { $0 == 1.0 })
     }
 }
 

@@ -49,7 +49,10 @@ extension Qwen3ASRModel: STTGenerationModel {
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration,
             repetitionPenalty: generationParameters.repetitionPenalty,
-            repetitionContextSize: generationParameters.repetitionContextSize
+            repetitionContextSize: generationParameters.repetitionContextSize,
+            kvBits: generationParameters.kvBits,
+            kvGroupSize: generationParameters.kvGroupSize,
+            quantizedKVStart: generationParameters.quantizedKVStart
         )
     }
 
@@ -66,7 +69,10 @@ extension Qwen3ASRModel: STTGenerationModel {
             chunkDuration: generationParameters.chunkDuration,
             minChunkDuration: generationParameters.minChunkDuration,
             repetitionPenalty: generationParameters.repetitionPenalty,
-            repetitionContextSize: generationParameters.repetitionContextSize
+            repetitionContextSize: generationParameters.repetitionContextSize,
+            kvBits: generationParameters.kvBits,
+            kvGroupSize: generationParameters.kvGroupSize,
+            quantizedKVStart: generationParameters.quantizedKVStart
         )
     }
 }
@@ -1055,13 +1061,16 @@ public class Qwen3ASRModel: Module {
     // MARK: - Audio Preprocessing
 
     public func preprocessAudio(_ audio: MLXArray) -> (MLXArray, MLXArray, Int) {
-        // Compute mel spectrogram
+        // Compute mel spectrogram (must match transformers' WhisperFeatureExtractor:
+        // slaney mel scale + periodic hann window)
         let melSpec = MLXAudioCore.computeMelSpectrogram(
             audio: audio,
             sampleRate: 16000,
             nFft: 400,
             hopLength: 160,
-            nMels: config.audioConfig.numMelBins
+            nMels: config.audioConfig.numMelBins,
+            melScale: .slaney,
+            hannPeriodic: true
         )
 
         // melSpec shape: [numFrames, nMels] -> need [1, nMels, numFrames]
@@ -1147,6 +1156,49 @@ public class Qwen3ASRModel: Module {
         return ("English", trimmed)
     }
 
+    func streamingVisibleText(from decodedText: String, forcedLanguage: String?) -> String {
+        let trimmed = decodedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalizeLanguageName(forcedLanguage) == nil else {
+            return trimmed
+        }
+
+        let parsed = extractLanguage(from: decodedText)
+        if parsed.language != nil {
+            return parsed.text
+        }
+
+        let languagePrefix = "language "
+        if languagePrefix.hasPrefix(trimmed) || trimmed.hasPrefix(languagePrefix) {
+            return ""
+        }
+
+        return trimmed
+    }
+
+    func streamingVisibleTextParts(
+        confirmedDecodedText: String,
+        combinedDecodedText: String,
+        forcedLanguage: String?
+    ) -> (confirmedText: String, provisionalText: String) {
+        let confirmedText = streamingVisibleText(
+            from: confirmedDecodedText,
+            forcedLanguage: forcedLanguage
+        )
+        let combinedText = streamingVisibleText(
+            from: combinedDecodedText,
+            forcedLanguage: forcedLanguage
+        )
+
+        guard combinedText.hasPrefix(confirmedText) else {
+            return ("", combinedText)
+        }
+
+        return (
+            confirmedText,
+            String(combinedText.dropFirst(confirmedText.count))
+        )
+    }
+
     static func mergeLanguages(_ languages: [String?]) -> String? {
         var seen: Set<String> = []
         var merged: [String] = []
@@ -1222,7 +1274,10 @@ public class Qwen3ASRModel: Module {
         context: String,
         language: String?,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> (text: String, language: String?, promptTokens: Int, generationTokens: Int) {
         guard let tokenizer = tokenizer else {
             fatalError("Tokenizer not loaded")
@@ -1249,7 +1304,7 @@ public class Qwen3ASRModel: Module {
             inputIds: inputIds
         )
 
-        let cache = makeCache()
+        var cache = makeCache()
 
         // Chunked prefill (mlx-lm.generate_step pattern): keeps lazy graph small,
         // materializes cache state between chunks, frees intermediate buffers.
@@ -1265,6 +1320,12 @@ public class Qwen3ASRModel: Module {
                 inputEmbeddings: chunkEmbeds,
                 cache: cache
             )
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
+            )
             eval(chunkLogits)
             Memory.clearCache()
             processedTokens += n
@@ -1276,6 +1337,12 @@ public class Qwen3ASRModel: Module {
             inputIds: lastIds,
             inputEmbeddings: lastEmbeds,
             cache: cache
+        )
+        maybeQuantizeKVCache(
+            cache: &cache,
+            kvBits: kvBits,
+            kvGroupSize: kvGroupSize,
+            quantizedKVStart: quantizedKVStart
         )
 
         var firstLast = firstLogits[0..., -1, 0...]
@@ -1314,6 +1381,12 @@ public class Qwen3ASRModel: Module {
 
             let nextInArr = MLXArray([Int32(prevTokenInt)]).expandedDimensions(axis: 0)
             let nextLogits = callAsFunction(inputIds: nextInArr, cache: cache)
+            maybeQuantizeKVCache(
+                cache: &cache,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
+            )
             var nextLast = nextLogits[0..., -1, 0...]
             if temperature > 0 {
                 nextLast = nextLast / temperature
@@ -1361,7 +1434,10 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> STTOutput {
         let startTime = Date()
         let forcedLanguage = normalizeLanguageName(language)
@@ -1375,7 +1451,7 @@ public class Qwen3ASRModel: Module {
         )
 
         var allTexts: [String] = []
-        var segments: [[String: Any]] = []
+        var segments: [STTTranscriptSegment] = []
         var totalPromptTokens = 0
         var totalGenerationTokens = 0
         var remainingTokens = maxTokens
@@ -1393,7 +1469,10 @@ public class Qwen3ASRModel: Module {
                 context: context,
                 language: forcedLanguage,
                 repetitionPenalty: repetitionPenalty,
-                repetitionContextSize: repetitionContextSize
+                repetitionContextSize: repetitionContextSize,
+                kvBits: kvBits,
+                kvGroupSize: kvGroupSize,
+                quantizedKVStart: quantizedKVStart
             )
 
             allTexts.append(result.text)
@@ -1402,15 +1481,14 @@ public class Qwen3ASRModel: Module {
             totalGenerationTokens += result.generationTokens
             remainingTokens -= result.generationTokens
 
-            var segment: [String: Any] = [
-                "text": result.text,
-                "start": Double(offsetSec),
-                "end": Double(offsetSec + actualChunkDuration),
-            ]
-            if let language = result.language {
-                segment["language"] = language
-            }
-            segments.append(segment)
+            segments.append(
+                STTTranscriptSegment(
+                    text: result.text,
+                    startTime: Double(offsetSec),
+                    endTime: Double(offsetSec + actualChunkDuration),
+                    language: result.language
+                )
+            )
 
             Memory.clearCache()
         }
@@ -1424,6 +1502,7 @@ public class Qwen3ASRModel: Module {
             text: fullText.trimmingCharacters(in: .whitespacesAndNewlines),
             segments: segments,
             language: mergedLanguage,
+            languageProvenance: forcedLanguage == nil ? .detected : .requested,
             promptTokens: totalPromptTokens,
             generationTokens: totalGenerationTokens,
             totalTokens: totalPromptTokens + totalGenerationTokens,
@@ -1444,7 +1523,10 @@ public class Qwen3ASRModel: Module {
         chunkDuration: Float = 1200.0,
         minChunkDuration: Float = 1.0,
         repetitionPenalty: Float = 1.0,
-        repetitionContextSize: Int = 32
+        repetitionContextSize: Int = 32,
+        kvBits: Int? = nil,
+        kvGroupSize: Int = 64,
+        quantizedKVStart: Int = 0
     ) -> AsyncThrowingStream<STTGeneration, Error> {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
@@ -1473,8 +1555,9 @@ public class Qwen3ASRModel: Module {
                     var remainingTokens = maxTokens
                     var allGeneratedTokens: [Int] = []
                     var resolvedLanguage = language
+                    var segments: [STTTranscriptSegment] = []
 
-                    for (chunkAudio, _) in chunks {
+                    for (chunkAudio, offsetSeconds) in chunks {
                         if remainingTokens <= 0 { break }
                         try Task.checkCancellation()
 
@@ -1501,11 +1584,17 @@ public class Qwen3ASRModel: Module {
                             inputIds: inputIds
                         )
 
-                        let cache = model.makeCache()
+                        var cache = model.makeCache()
                         var logits = model.callAsFunction(
                             inputIds: inputIds,
                             inputEmbeddings: inputsEmbeds,
                             cache: cache
+                        )
+                        maybeQuantizeKVCache(
+                            cache: &cache,
+                            kvBits: kvBits,
+                            kvGroupSize: kvGroupSize,
+                            quantizedKVStart: quantizedKVStart
                         )
                         eval(logits)
 
@@ -1570,11 +1659,33 @@ public class Qwen3ASRModel: Module {
 
                             let nextTokenArray = MLXArray([Int32(nextToken)]).expandedDimensions(axis: 0)
                             logits = model.callAsFunction(inputIds: nextTokenArray, cache: cache)
+                            maybeQuantizeKVCache(
+                                cache: &cache,
+                                kvBits: kvBits,
+                                kvGroupSize: kvGroupSize,
+                                quantizedKVStart: quantizedKVStart
+                            )
                             eval(logits)
                         }
 
                         totalGenerationTokens += chunkTokens.count
                         remainingTokens -= chunkTokens.count
+
+                        let decodedChunk = tokenizer.decode(tokens: chunkTokens)
+                        let parsedChunk = model.extractLanguage(from: decodedChunk)
+                        let chunkText = parsedChunk.language == nil
+                            ? decodedChunk.trimmingCharacters(in: .whitespacesAndNewlines)
+                            : parsedChunk.text
+                        if !chunkText.isEmpty {
+                            segments.append(
+                                STTTranscriptSegment(
+                                    text: chunkText,
+                                    startTime: Double(offsetSeconds),
+                                    endTime: Double(offsetSeconds) + Double(chunkAudio.dim(0)) / Double(model.sampleRate),
+                                    language: parsedChunk.language ?? resolvedLanguage
+                                )
+                            )
+                        }
 
                         if resolvedLanguage == nil && !languagePrefixBuffer.isEmpty {
                             continuation.yield(.token(languagePrefixBuffer))
@@ -1606,7 +1717,9 @@ public class Qwen3ASRModel: Module {
                     let text = language == nil ? parsed.text : decodedText.trimmingCharacters(in: .whitespacesAndNewlines)
                     let output = STTOutput(
                         text: text,
+                        segments: segments.isEmpty ? nil : segments,
                         language: outputLanguage,
+                        languageProvenance: language == nil ? .detected : .requested,
                         promptTokens: totalPromptTokens,
                         generationTokens: totalGenerationTokens,
                         totalTokens: totalPromptTokens + totalGenerationTokens,

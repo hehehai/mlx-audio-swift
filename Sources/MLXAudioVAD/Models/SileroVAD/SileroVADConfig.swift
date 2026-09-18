@@ -59,6 +59,7 @@ public struct SileroVADConfig: Codable, Sendable {
     public var speechPadMs: Int
     public var branch16k: SileroVADBranchConfig
     public var branch8k: SileroVADBranchConfig
+    public var supports8k: Bool
 
     public init(
         modelType: String = "silero_vad",
@@ -69,7 +70,8 @@ public struct SileroVADConfig: Codable, Sendable {
         minSilenceDurationMs: Int = 100,
         speechPadMs: Int = 30,
         branch16k: SileroVADBranchConfig = .default16k,
-        branch8k: SileroVADBranchConfig = .default8k
+        branch8k: SileroVADBranchConfig = .default8k,
+        supports8k: Bool = true
     ) {
         self.modelType = modelType
         self.architecture = architecture
@@ -80,6 +82,7 @@ public struct SileroVADConfig: Codable, Sendable {
         self.speechPadMs = speechPadMs
         self.branch16k = branch16k
         self.branch8k = branch8k
+        self.supports8k = supports8k
     }
 
     enum CodingKeys: String, CodingKey {
@@ -103,7 +106,25 @@ public struct SileroVADConfig: Codable, Sendable {
         minSpeechDurationMs = try c.decodeIfPresent(Int.self, forKey: .minSpeechDurationMs) ?? 250
         minSilenceDurationMs = try c.decodeIfPresent(Int.self, forKey: .minSilenceDurationMs) ?? 100
         speechPadMs = try c.decodeIfPresent(Int.self, forKey: .speechPadMs) ?? 30
-        branch16k = try c.decodeIfPresent(SileroVADBranchConfig.self, forKey: .branch16k) ?? .default16k
-        branch8k = try c.decodeIfPresent(SileroVADBranchConfig.self, forKey: .branch8k) ?? .default8k
+        let decoded16k = try c.decodeIfPresent(SileroVADBranchConfig.self, forKey: .branch16k)
+        let decoded8k = try c.decodeIfPresent(SileroVADBranchConfig.self, forKey: .branch8k)
+        branch16k = decoded16k ?? .default16k
+        branch8k = decoded8k ?? .default8k
+        supports8k = decoded8k != nil || decoded16k == nil
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(modelType, forKey: .modelType)
+        try c.encode(architecture, forKey: .architecture)
+        try c.encode(dtype, forKey: .dtype)
+        try c.encode(threshold, forKey: .threshold)
+        try c.encode(minSpeechDurationMs, forKey: .minSpeechDurationMs)
+        try c.encode(minSilenceDurationMs, forKey: .minSilenceDurationMs)
+        try c.encode(speechPadMs, forKey: .speechPadMs)
+        try c.encode(branch16k, forKey: .branch16k)
+        if supports8k {
+            try c.encode(branch8k, forKey: .branch8k)
+        }
     }
 }

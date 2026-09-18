@@ -161,7 +161,8 @@ public final class ParakeetModel: Module, STTGenerationModel {
         return STTOutput(
             text: result.text,
             segments: result.segments,
-            language: generationParameters.language
+            language: generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .unknown : .requested
         )
     }
 
@@ -192,7 +193,8 @@ public final class ParakeetModel: Module, STTGenerationModel {
             STTOutput(
                 text: $0.text,
                 segments: $0.segments,
-                language: generationParameters.language
+                language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .unknown : .requested
             )
         }
     }
@@ -258,6 +260,7 @@ public final class ParakeetModel: Module, STTGenerationModel {
                         text: currentResult.text,
                         segments: currentResult.segments,
                         language: generationParameters.language,
+                        languageProvenance: generationParameters.language == nil ? .unknown : .requested,
                         totalTime: audioDuration
                     )
                     continuation.yield(.result(output))
@@ -272,6 +275,7 @@ public final class ParakeetModel: Module, STTGenerationModel {
                 text: previousText,
                 segments: nil,
                 language: generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .unknown : .requested,
                 totalTime: audioDuration
             )
             continuation.yield(.result(finalOutput))
@@ -1200,4 +1204,3 @@ private extension Array {
         return self[index]
     }
 }
-

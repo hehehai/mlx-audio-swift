@@ -42,7 +42,7 @@ public final class WhisperModel: Module, STTGenerationModel {
         let chunks = chunkAudioFor30sWindows(mono)
 
         var allText: [String] = []
-        var allSegments: [[String: Any]] = []
+        var allSegments: [STTTranscriptSegment] = []
         var totalPromptTokens = 0
         var totalGenerationTokens = 0
         var detectedLanguage: String? = nil
@@ -64,11 +64,14 @@ public final class WhisperModel: Module, STTGenerationModel {
             if !trimmed.isEmpty {
                 allText.append(trimmed)
                 let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
-                allSegments.append([
-                    "text": trimmed,
-                    "start": Double(chunk.offsetSeconds),
-                    "end": endSeconds,
-                ])
+                allSegments.append(
+                    STTTranscriptSegment(
+                        text: trimmed,
+                        startTime: Double(chunk.offsetSeconds),
+                        endTime: endSeconds,
+                        language: lang
+                    )
+                )
             }
         }
 
@@ -79,6 +82,7 @@ public final class WhisperModel: Module, STTGenerationModel {
             text: combined,
             segments: allSegments.isEmpty ? nil : allSegments,
             language: detectedLanguage ?? generationParameters.language,
+            languageProvenance: generationParameters.language == nil ? .detected : .requested,
             promptTokens: totalPromptTokens,
             generationTokens: totalGenerationTokens,
             totalTokens: totalPromptTokens + totalGenerationTokens,
@@ -99,7 +103,7 @@ public final class WhisperModel: Module, STTGenerationModel {
             let chunks = chunkAudioFor30sWindows(mono)
 
             var allText: [String] = []
-            var allSegments: [[String: Any]] = []
+            var allSegments: [STTTranscriptSegment] = []
             var totalPromptTokens = 0
             var totalGenerationTokens = 0
             var detectedLanguage: String? = nil
@@ -127,11 +131,14 @@ public final class WhisperModel: Module, STTGenerationModel {
                 if !trimmed.isEmpty {
                     allText.append(trimmed)
                     let endSeconds = Double(chunk.offsetSeconds) + Double(chunk.audio.dim(0)) / Double(WhisperAudioConfig.sampleRate)
-                    allSegments.append([
-                        "text": trimmed,
-                        "start": Double(chunk.offsetSeconds),
-                        "end": endSeconds,
-                    ])
+                    allSegments.append(
+                        STTTranscriptSegment(
+                            text: trimmed,
+                            startTime: Double(chunk.offsetSeconds),
+                            endTime: endSeconds,
+                            language: lang
+                        )
+                    )
                 }
             }
 
@@ -142,6 +149,7 @@ public final class WhisperModel: Module, STTGenerationModel {
                 text: combined,
                 segments: allSegments.isEmpty ? nil : allSegments,
                 language: detectedLanguage ?? generationParameters.language,
+                languageProvenance: generationParameters.language == nil ? .detected : .requested,
                 promptTokens: totalPromptTokens,
                 generationTokens: totalGenerationTokens,
                 totalTokens: totalPromptTokens + totalGenerationTokens,
@@ -403,8 +411,9 @@ public final class WhisperModel: Module, STTGenerationModel {
         if rawKey == "decoder.positional_embedding" {
             return "model.decoder.embed_positions.weight"
         }
-        if rawKey == "decoder.token_embedding.weight" {
-            return "model.decoder.embed_tokens.weight"
+        if rawKey.hasPrefix("decoder.token_embedding.") {
+            return "model.decoder.embed_tokens."
+                + String(rawKey.dropFirst("decoder.token_embedding.".count))
         }
         if rawKey == "encoder.conv1.weight" || rawKey == "encoder.conv1.bias"
             || rawKey == "encoder.conv2.weight" || rawKey == "encoder.conv2.bias"
@@ -495,6 +504,19 @@ public final class WhisperModel: Module, STTGenerationModel {
         }
 
         let model = WhisperModel(config: config, generationConfig: generationConfig)
+        if let quantization = try? JSONDecoder().decode(
+            WhisperQuantizedModelConfig.self,
+            from: configData
+        ).quantization {
+            quantize(
+                model: model,
+                groupSize: quantization.groupSize,
+                bits: quantization.bits,
+                filter: { path, module in
+                    module is Linear || path.hasSuffix("decoder.embed_tokens")
+                }
+            )
+        }
 
         let files = try FileManager.default.contentsOfDirectory(
             at: modelDirectory,
@@ -646,5 +668,19 @@ public final class WhisperModel: Module, STTGenerationModel {
             cache: cache
         )
         return try await fromDirectory(modelDir, cache: cache)
+    }
+}
+
+private struct WhisperQuantizedModelConfig: Decodable {
+    let quantization: WhisperQuantizationConfig?
+}
+
+private struct WhisperQuantizationConfig: Decodable {
+    let groupSize: Int
+    let bits: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case groupSize = "group_size"
+        case bits
     }
 }

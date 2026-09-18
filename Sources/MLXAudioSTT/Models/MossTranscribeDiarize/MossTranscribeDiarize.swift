@@ -328,6 +328,19 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
         audio: MLXArray,
         generationParameters: STTGenerateParameters
     ) -> AsyncThrowingStream<STTGeneration, Error> {
+        generateStream(
+            audio: audio,
+            generationParameters: generationParameters,
+            prompt: nil
+        )
+    }
+
+    /// Generates a cancellable MOSS transcription stream with an optional task prompt.
+    public func generateStream(
+        audio: MLXArray,
+        generationParameters: STTGenerateParameters,
+        prompt: String?
+    ) -> AsyncThrowingStream<STTGeneration, Error> {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
         return AsyncThrowingStream { continuation in
@@ -357,7 +370,7 @@ public final class MossTranscribeDiarizeModel: Module, STTGenerationModel {
                             temperature: generationParameters.temperature,
                             repetitionPenalty: generationParameters.repetitionPenalty,
                             repetitionContextSize: generationParameters.repetitionContextSize,
-                            prompt: nil,
+                            prompt: prompt,
                             offsetSeconds: Double(offsetSeconds),
                             kvBits: generationParameters.kvBits,
                             kvGroupSize: generationParameters.kvGroupSize,
@@ -820,7 +833,7 @@ extension MossTranscribeDiarizeModel {
             temperature: config.temperature,
             repetitionPenalty: defaults.repetitionPenalty,
             repetitionContextSize: defaults.repetitionContextSize,
-            prompt: nil,
+            prompt: config.prompt,
             offsetSeconds: offsetSeconds,
             onText: onText
         )
@@ -903,10 +916,16 @@ extension MossTranscribeDiarizeModel {
         text: String,
         fallbackEnd: Double,
         offsetSeconds: Double = 0
-    ) -> [[String: Any]] {
+    ) -> [STTTranscriptSegment] {
         let pattern = #"\[(\d+(?:[\.,]\d+)?)\]\[(S\d+)\](.*?)\[(\d+(?:[\.,]\d+)?)\]"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else {
-            return [["start": offsetSeconds, "end": offsetSeconds + max(fallbackEnd, 0.0), "text": text]]
+            return [
+                STTTranscriptSegment(
+                    text: text,
+                    startTime: offsetSeconds,
+                    endTime: offsetSeconds + max(fallbackEnd, 0.0)
+                ),
+            ]
         }
 
         let nsText = text as NSString
@@ -915,7 +934,7 @@ extension MossTranscribeDiarizeModel {
             options: [],
             range: NSRange(location: 0, length: nsText.length)
         )
-        var segments: [[String: Any]] = []
+        var segments: [STTTranscriptSegment] = []
         for match in matches {
             guard match.numberOfRanges == 5,
                   let start = Self.timestampValue(nsText.substring(with: match.range(at: 1))),
@@ -930,18 +949,26 @@ extension MossTranscribeDiarizeModel {
             guard !segmentText.isEmpty else {
                 continue
             }
-            segments.append([
-                "start": start + offsetSeconds,
-                "end": end + offsetSeconds,
-                "text": "[\(speaker)] \(segmentText)",
-                "speaker_id": speaker,
-            ])
+            segments.append(
+                STTTranscriptSegment(
+                    text: segmentText,
+                    startTime: start + offsetSeconds,
+                    endTime: end + offsetSeconds,
+                    speakerID: speaker
+                )
+            )
         }
 
         if !segments.isEmpty {
             return segments
         }
-        return [["start": offsetSeconds, "end": offsetSeconds + max(fallbackEnd, 0.0), "text": text]]
+        return [
+            STTTranscriptSegment(
+                text: text,
+                startTime: offsetSeconds,
+                endTime: offsetSeconds + max(fallbackEnd, 0.0)
+            ),
+        ]
     }
 
     private static func timestampValue(_ text: String) -> Double? {

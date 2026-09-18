@@ -96,12 +96,22 @@ public enum TTS {
         source: ModelSource,
         textProcessor: TextProcessor?
     ) async throws -> SpeechGenerationModel {
-        let resolvedType = normalizedModelType(modelType) ?? inferModelType(from: source.fallbackName)
+        var resolvedType = normalizedModelType(modelType) ?? inferModelType(from: source.fallbackName)
+        if resolvedType == "qwen2", source.fallbackName.lowercased().contains("spark") {
+            resolvedType = "spark"
+        }
         guard let resolvedType else {
             throw TTSModelError.unsupportedModelType(modelType)
         }
 
         switch resolvedType {
+        case "breeze", "breeze_tts":
+            return try await load(
+                source,
+                modelType: resolvedType,
+                pretrained: { try await BreezeTTSModel.fromPretrained($0, cache: $1) },
+                local: { modelDir, _ in try await BreezeTTSModel.fromModelDirectory(modelDir) }
+            )
         case "moss_tts_nano":
             return try await load(
                 source,
@@ -214,6 +224,12 @@ public enum TTS {
                 pretrained: { try await IndexTTSModel.fromPretrained($0, cache: $1) },
                 local: { modelDir, _ in try await IndexTTSModel.fromModelDirectory(modelDir) }
             )
+        case "spark", "spark_tts":
+            return try await load(
+                source,
+                modelType: resolvedType,
+                pretrained: { try await SparkModel.fromPretrained($0, cache: $1) }
+            )
         default:
             throw TTSModelError.unsupportedModelType(resolvedType)
         }
@@ -272,7 +288,13 @@ public enum TTS {
 
     private static func inferModelType(from modelRepo: String) -> String? {
         let lower = modelRepo.lowercased()
+        if lower.contains("breeze") && lower.contains("tts") {
+            return "breeze"
+        }
         // Repo names are hyphenated (e.g. "Irodori-TTS-600M-…"); match the bare name.
+        if lower.contains("spark") {
+            return "spark"
+        }
         if lower.contains("irodori") {
             return "irodori_tts"
         }

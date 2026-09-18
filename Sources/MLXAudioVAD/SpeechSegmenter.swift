@@ -3,6 +3,13 @@ import Foundation
 
 /// Configuration for VAD-based speech segmentation — model-agnostic chunking of an
 /// audio buffer into speech regions for downstream transcription.
+public enum SpeechSegmentNoSpeechPolicy: Sendable, Equatable {
+    /// Preserve the legacy behavior and pass the full audio buffer downstream.
+    case useFullAudio
+    /// Return no chunks so callers can suppress transcription of silence.
+    case returnEmpty
+}
+
 public struct SpeechSegmentConfig: Sendable {
     public var threshold: Float
     public var minSpeechMs: Int
@@ -10,6 +17,7 @@ public struct SpeechSegmentConfig: Sendable {
     public var speechPadMs: Int
     public var mergeGapS: Float
     public var maxChunkS: Float
+    public var noSpeechPolicy: SpeechSegmentNoSpeechPolicy
 
     public init(
         threshold: Float = 0.5,
@@ -17,7 +25,8 @@ public struct SpeechSegmentConfig: Sendable {
         minSilenceMs: Int = 100,
         speechPadMs: Int = 30,
         mergeGapS: Float = 1.0,
-        maxChunkS: Float = 30.0
+        maxChunkS: Float = 30.0,
+        noSpeechPolicy: SpeechSegmentNoSpeechPolicy = .useFullAudio
     ) {
         self.threshold = threshold
         self.minSpeechMs = minSpeechMs
@@ -25,6 +34,7 @@ public struct SpeechSegmentConfig: Sendable {
         self.speechPadMs = speechPadMs
         self.mergeGapS = mergeGapS
         self.maxChunkS = maxChunkS
+        self.noSpeechPolicy = noSpeechPolicy
     }
 }
 
@@ -156,9 +166,9 @@ private func mergeRuns(
 
 /// Split an audio buffer into speech segments with a Silero VAD, returning each segment
 /// paired with its start offset (seconds). Silence is dropped; adjacent runs within
-/// `mergeGapS` are merged and long runs are split at `maxChunkS`. If no speech is found
-/// the whole buffer is returned as a single segment. Model-agnostic — reuse across STT
-/// models instead of per-model VAD wrappers.
+/// `mergeGapS` are merged and long runs are split at `maxChunkS`. `noSpeechPolicy`
+/// controls whether silence produces no chunks or preserves the legacy full-buffer result.
+/// Model-agnostic — reuse across STT models instead of per-model VAD wrappers.
 public func segmentSpeech(
     audio: MLXArray,
     sampleRate: Int,
@@ -173,7 +183,12 @@ public func segmentSpeech(
         raw, sampleRate: sampleRate, mergeGapS: config.mergeGapS, maxChunkS: config.maxChunkS
     )
     if runs.isEmpty {
-        return [(audio1D, 0)]
+        switch config.noSpeechPolicy {
+        case .useFullAudio:
+            return [(audio1D, 0)]
+        case .returnEmpty:
+            return []
+        }
     }
     return runs.map { run in
         let chunk = audio1D[run.startSample ..< run.endSample]

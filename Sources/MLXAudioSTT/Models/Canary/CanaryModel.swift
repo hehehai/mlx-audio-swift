@@ -384,14 +384,16 @@ public final class CanaryModel: Module, STTGenerationModel {
 
     public func generate(audio: MLXArray, generationParameters: STTGenerateParameters) -> STTOutput {
         let start = CFAbsoluteTimeGetCurrent()
-        let language = generationParameters.language ?? "en"
+        let sourceLanguage = generationParameters.language ?? "en"
+        let targetLanguage = generationParameters.targetLanguage ?? sourceLanguage
         let mel = preprocessAudio(audio).asType(.float32)
         let encoded = encode(mel: mel)
 
         let promptTokens = tokenizer?.buildPromptTokens(
             config: config,
-            sourceLanguage: language,
-            targetLanguage: language
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            usePunctuationAndCapitalization: generationParameters.usePunctuation ?? true
         ) ?? CanaryTokenizer.defaultPromptTokens(config: config)
         let eosTokenId = tokenizer?.eosTokenId(config: config) ?? config.endOfTextId
 
@@ -418,10 +420,18 @@ public final class CanaryModel: Module, STTGenerationModel {
 
         let text = decode(tokens: generated).trimmingCharacters(in: .whitespacesAndNewlines)
         let totalTime = CFAbsoluteTimeGetCurrent() - start
+        let languageProvenance: STTLanguageProvenance = if targetLanguage != sourceLanguage {
+            .outputTarget
+        } else if generationParameters.language == nil {
+            .modelDefault
+        } else {
+            .requested
+        }
         return STTOutput(
             text: text,
-            segments: [["text": text, "start": 0.0, "end": 0.0]],
-            language: language,
+            segments: [STTTranscriptSegment(text: text)],
+            language: targetLanguage,
+            languageProvenance: languageProvenance,
             promptTokens: promptTokens.count,
             generationTokens: generated.count,
             totalTokens: tokens.count,

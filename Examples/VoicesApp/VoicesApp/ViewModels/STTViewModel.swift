@@ -376,8 +376,10 @@ class STTViewModel {
                 case .stats(let stats):
                     tokensPerSecond = stats.tokensPerSecond
                     peakMemory = stats.peakMemoryGB
-                case .ended(let fullText):
-                    transcriptionText = fullText
+                case .ended(let output):
+                    transcriptionText = output.text
+                case .failed:
+                    break
                 }
             }
             // Stream ended naturally — clean up
