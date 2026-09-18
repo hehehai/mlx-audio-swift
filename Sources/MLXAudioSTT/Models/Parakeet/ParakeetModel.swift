@@ -53,7 +53,11 @@ public final class ParakeetModel: Module, STTGenerationModel {
     var tdtDecoderImplementation: TDTDecoderImplementation?
     var encoderExecutionImplementation: EncoderExecutionImplementation?
     var tdtTraceEmitter: (@Sendable (TDTTraceStep) -> Void)?
-    private var compiledEncoderFeaturesByShape: [String: @Sendable (MLXArray) -> MLXArray] = [:]
+    // Declare model weights as trace inputs rather than capturing them as constants.
+    // CompiledTrace caches shape specializations and does not retain its owner.
+    private let compiledEncoderFeatures = CompiledTrace<ParakeetConformer> { encoder, arrays in
+        [encoder(arrays[0]).0]
+    }
 
     public var defaultGenerationParameters: STTGenerateParameters {
         STTGenerateParameters(
@@ -72,11 +76,7 @@ public final class ParakeetModel: Module, STTGenerationModel {
         vocabulary.count
     }
 
-    private lazy var compiledTDTStep = makeCompiledTDTStep(
-        decoder: self.decoder,
-        joint: self.joint,
-        blankTokenId: self.blankTokenId
-    )
+    private let compiledTDTStep = makeCompiledTDTStep()
 
     private init(
         variant: Variant,
@@ -314,23 +314,10 @@ public final class ParakeetModel: Module, STTGenerationModel {
         case .plain:
             return encoder(features, lengths: resolvedLengths)
         case .compiled:
-            let encodedFeatures = compiledEncoderFeatures(for: features)(features)
+            let encodedFeatures = compiledEncoderFeatures(encoder, features)
             let encodedLengths = computeEncodedLengths(from: resolvedLengths)
             return (encodedFeatures, encodedLengths)
         }
-    }
-
-    func compiledEncoderFeatures(for features: MLXArray) -> @Sendable (MLXArray) -> MLXArray {
-        let key = "\(features.shape)-\(features.dtype)"
-        if let compiled = compiledEncoderFeaturesByShape[key] {
-            return compiled
-        }
-
-        let compiled: @Sendable (MLXArray) -> MLXArray = compile { [self] features in
-            self.encoder(features).0
-        }
-        compiledEncoderFeaturesByShape[key] = compiled
-        return compiled
     }
 
     func computeEncodedLengths(from lengths: MLXArray) -> MLXArray {
@@ -416,7 +403,7 @@ public final class ParakeetModel: Module, STTGenerationModel {
             while t < maxLength {
                 let frame = featureSeq[0..., t..<(t + 1), 0...]
 
-                let stepOutputs = compiledTDTStep([
+                let stepOutputs = compiledTDTStep(self, [
                     frame,
                     currentToken,
                     state.hidden!,
@@ -895,20 +882,19 @@ public final class ParakeetModel: Module, STTGenerationModel {
     }
 }
 
-private func makeCompiledTDTStep(
-    decoder: ParakeetPredictNetwork?,
-    joint: ParakeetJointNetwork?,
-    blankTokenId: Int
-) -> @Sendable ([MLXArray]) -> [MLXArray] {
-    guard let decoder, let joint else {
-        return { arrays in
-            [MLXArray([Int32(0), Int32(0)]), arrays[2], arrays[3]]
+private func makeCompiledTDTStep() -> CompiledTrace<ParakeetModel> {
+    CompiledTrace(state: { model in
+        // The decoder step reads no encoder/CTC weights.
+        var modules: [Module] = []
+        if let decoder = model.decoder { modules.append(decoder) }
+        if let joint = model.joint { modules.append(joint) }
+        return modules
+    }) { model, arrays in
+        guard let decoder = model.decoder, let joint = model.joint else {
+            return [MLXArray([Int32(0), Int32(0)]), arrays[2], arrays[3]]
         }
-    }
-
-    let blankTokenArray = MLXArray(Int32(blankTokenId)).reshaped([1, 1])
-
-    return compile { arrays in
+        let blankTokenId = model.vocabulary.count
+        let blankTokenArray = MLXArray(Int32(blankTokenId)).reshaped([1, 1])
         let feature = arrays[0]
         let currentToken = arrays[1]
         let hidden = arrays[2]

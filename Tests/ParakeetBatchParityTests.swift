@@ -1,5 +1,6 @@
 import Foundation
 import MLX
+import MLXNN
 import Testing
 import Darwin
 
@@ -233,6 +234,57 @@ struct ParakeetBatchParityTests {
         let compiledDecoded = model.decodeEncoded(batchFeatures: compiledEncoded.0, lengths: compiledEncoded.1)
 
         #expect(plainDecoded.map(alignedResultSignature) == compiledDecoded.map(alignedResultSignature))
+    }
+
+    @Test("Compiled encoder observes in-place weight updates")
+    func compiledEncoderObservesWeightUpdates() throws {
+        let model = try makeTDTFixtureModel()
+        let features = model.makeBatchFeatures([makeChunkAudio(sampleCount: 4_800, frequency: 180)])
+        model.encoderExecutionImplementation = .compiled
+        let before = model.encodeBatchFeatures(features.features, lengths: features.lengths).0
+        eval(before)
+        let beforeValues = before.asArray(Float.self)
+
+        try model.encoder.update(parameters: ModuleParameters.unflattened([
+            "pre_encode.out.bias": MLXArray.ones([16], type: Float.self).asType(model.computeDType)
+        ]))
+        let after = model.encodeBatchFeatures(features.features, lengths: features.lengths).0
+        eval(after)
+        model.encoderExecutionImplementation = .plain
+        let plain = model.encodeBatchFeatures(features.features, lengths: features.lengths).0
+        eval(plain)
+
+        #expect(beforeValues != after.asArray(Float.self))
+        #expect(after.shape == plain.shape)
+        #expect(MLX.abs(after - plain).max().item(Float.self) < 0.02)
+    }
+
+    @Test("Compiled TDT step observes in-place joint weight updates")
+    func compiledTDTStepObservesWeightUpdates() throws {
+        let model = try makeTDTFixtureModel()
+        model.tdtDecoderImplementation = .serial
+        let audio = makeChunkAudio(sampleCount: 4_800, frequency: 180)
+        let before = model.generate(audio: audio)
+        let joint = try #require(model.joint)
+        try joint.update(parameters: ModuleParameters.unflattened([
+            "joint_net.bias": MLXArray([Float(0), 1, 4, -1, -3, 0, 5, 1]).asType(model.computeDType)
+        ]))
+        let after = model.generate(audio: audio)
+        #expect(before.text != after.text)
+    }
+
+    @Test("Compiled encoder does not retain its model owner")
+    func compiledEncoderDoesNotRetainModel() throws {
+        weak var releasedModel: ParakeetModel?
+        try autoreleasepool {
+            let model = try makeTDTFixtureModel()
+            releasedModel = model
+            model.encoderExecutionImplementation = .compiled
+            let features = model.makeBatchFeatures([makeChunkAudio(sampleCount: 4_800, frequency: 180)])
+            let output = model.encodeBatchFeatures(features.features, lengths: features.lengths)
+            eval(output.0, output.1)
+        }
+        #expect(releasedModel == nil)
     }
 
     @Test("Parakeet stage benchmark harness measures mel encoder decode and full batch")
