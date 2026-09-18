@@ -22,6 +22,17 @@ jobs:
           xcrun swift --version
       - name: Install Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
+      - name: Resolve upgraded dependencies
+        run: xcodebuild -resolvePackageDependencies -scheme MLXAudio-Package -skipPackagePluginValidation
+      - name: Preserve resolved graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlx-audio-resolved-dependencies
+          path: |
+            Package.resolved
+            .swiftpm/xcode/package.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          include-hidden-files: true
+          if-no-files-found: error
       - name: Build
         run: xcodebuild build-for-testing -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO
       - name: Run tests

@@ -1,4 +1,4 @@
-// swift-tools-version:6.2
+// swift-tools-version:6.3
 import PackageDescription
 
 let package = Package(
@@ -60,10 +60,11 @@ let package = Package(
 
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.4"),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.31.4")),
-        .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.3.3")),
-        .package(url: "https://github.com/huggingface/swift-huggingface.git", .upToNextMajor(from: "0.9.0"))
+        // Upgrade the MLX runtime and LM APIs as one reproducible compatibility set.
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", exact: "0.31.6"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", revision: "c6446cf7bfb7cea76408013b614d4b2c530eaa03"),
+        .package(url: "https://github.com/huggingface/swift-transformers.git", exact: "1.3.4"),
+        .package(url: "https://github.com/huggingface/swift-huggingface.git", exact: "0.10.2")
     ],
     targets: [
         // MARK: - MLXAudioCore
@@ -104,6 +105,7 @@ let package = Package(
                 "MLXAudioG2P",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "MLXFFT", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),

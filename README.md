@@ -5,7 +5,7 @@
 A modular Swift SDK for audio processing with MLX on Apple Silicon
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-lightgrey)
-![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange)
+![Swift](https://img.shields.io/badge/Swift-6.3%2B-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Architecture
@@ -14,7 +14,7 @@ MLXAudio follows a modular design allowing you to import only what you need:
 
 - **MLXAudioCore**: Base types, protocols, and utilities
 - **MLXAudioCodecs**: Audio codec implementations (SNAC, Encodec, Vocos, Mimi, DACVAE, Descript DAC, Fish S1 DAC, S3TokenizerV2, MOSS Audio Tokenizer, Higgs Audio Tokenizer, Step-Audio-2 token-to-wav)
-- **MLXAudioTTS**: Text-to-Speech models (Qwen3-TTS, OmniVoice, Fish Audio S2 Pro, IndexTTS, Soprano, VyvoTTS, Orpheus, MOSS-TTS, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano, Irodori TTS)
+- **MLXAudioTTS**: Text-to-Speech models (Breeze TTS 2, Spark-TTS, Qwen3-TTS, OmniVoice, Fish Audio S2 Pro, IndexTTS, Soprano, VyvoTTS, Orpheus, MOSS-TTS, Marvis TTS, Pocket TTS, Chatterbox, Echo TTS, KittenTTS, Kokoro, MOSS-TTS-Nano, Irodori TTS)
 - **MLXAudioSTT**: Speech-to-Text models (Qwen3-ASR, Qwen3-ForcedAligner, Voxtral Realtime, Cohere Transcribe, Parakeet, Nemotron ASR, GLM-ASR, Granite Speech, SenseVoice, FireRed ASR 2, Whisper, Canary, Moonshine, Wav2Vec2, MMS, LASR CTC, MOSS-Transcribe-Diarize)
 - **MLXAudioVAD**: Voice Activity Detection & Speaker Diarization (Sortformer, SmartTurn, FSMN VAD, Silero VAD)
 - **MLXAudioLID**: Spoken language identification (MMS-LID-256, VoxLingua107 ECAPA-TDNN)
@@ -123,6 +123,8 @@ For the full checkpoint matrix of each family, see the model-specific README lin
 
 | Model family | Current support in Swift | Model README | Example / default repo |
 |--------------|--------------------------|--------------|------------------------|
+| Breeze TTS 2 | Breeze TTS 2 checkpoints | [Breeze TTS 2 README](Sources/MLXAudioTTS/Models/BreezeTTS/README.md) | [mlx-community/Breeze-TTS-2-mlx-4bit](https://huggingface.co/mlx-community/Breeze-TTS-2-mlx-4bit) |
+| Spark-TTS | Spark-TTS checkpoints | [Spark-TTS README](Sources/MLXAudioTTS/Models/Spark/README.md) | [mlx-community/Spark-TTS-0.5B-bf16](https://huggingface.co/mlx-community/Spark-TTS-0.5B-bf16) |
 | Qwen3-TTS | Base, CustomVoice, and VoiceDesign checkpoints; 0.6B and 1.7B variants documented | [Qwen3-TTS README](Sources/MLXAudioTTS/Models/Qwen3TTS/README.md) | [mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit](https://huggingface.co/mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit) |
 | OmniVoice | NAR diffusion over Qwen3 plus HiggsAudioV2 codec with voice cloning | [OmniVoice README](Sources/MLXAudioTTS/Models/OmniVoice/README.md) | [mlx-community/OmniVoice](https://huggingface.co/mlx-community/OmniVoice) |
 | Fish Audio S2 Pro | bf16 and 8bit checkpoints; reference voice cloning supported | [Fish Audio S2 Pro README](Sources/MLXAudioTTS/Models/FishSpeech/README.md) | [mlx-community/fish-audio-s2-pro-8bit](https://huggingface.co/mlx-community/fish-audio-s2-pro-8bit) |
@@ -255,6 +257,8 @@ let audio = try await model.generate(
 ```
 
 ## Requirements
+
+For this fork's local Voxt upgrade candidate, see [VOXT_UPGRADE.md](VOXT_UPGRADE.md) for the pinned compatibility set and validation status. It has not been published or validated on macOS yet.
 
 - **macOS 14+** or **iOS 17+**
 - **Apple Silicon** (M1 or later) recommended for optimal performance
