@@ -1,13 +1,13 @@
 # Voxt MLX upgrade candidate
 
-This is a **local, unvalidated candidate**, not a published release.
+This upgrade is being promoted to the fork's `main` at the maintainer's request. It is **not a validated release tag**: macOS compilation and model regression results remain pending. Pushing to `main` triggers CI; the workflow also supports manual runs.
 
 ## Provenance
 
 - Working branch: `chore/voxt-model-stack-modernization`.
 - Base: `v0.1.3-voxt.12`, commit `95b4587ef74e93825d3cd872a1694cab49ed0946`.
 - Upstream content integrated through `3e978558404df4ad1bbb0a5634a03df2b0f9dfa5`.
-- Upstream changes were squash-integrated into the candidate branch. This work is recorded as a local candidate commit; no release tag has been created and nothing has been pushed.
+- Upstream changes were squash-integrated in candidate commit `0bfe9f31e6473b461f3bdf2c3382f2478792976e`. The existing remote `main` history was merged before promotion, without a force push. No release tag is created by this promotion.
 - README and STT test conflicts were resolved by retaining the fork contracts and the new upstream tests.
 
 Do not start from the fork's older `main` to reproduce this candidate. Voxt requires the `.12` patches: structured `TranscriptionEvent.ended(STTOutput)`, language provenance, Qwen KV quantization/language routing, incremental Nemotron events and streaming/VAD failure propagation.
@@ -61,4 +61,4 @@ xcodebuild test-without-building -scheme MLXAudio-Package \
 
 Then validate Voxt against this local checkout as documented in its `docs/MLXAudioDependency.md`. Run Qwen dictation, SenseVoice fixtures, Whisper, MOSS/Nemotron live stop and Sortformer, as well as local LLM/VLM loading and memory benchmarks. Swift compilation, Metal execution and model accuracy have **not** been tested in the Linux preparation environment.
 
-Only after both repos pass macOS validation: review the candidate commit, commit any fixes and the actual resolved graph, publish an immutable fork revision/tag, update Voxt's remote package and LM pins together, apply the tested Voxt API adapter, and update its dependency audit expectations. Do not point a release at an unpublished local commit or embed a developer's absolute package path in the shared project.
+Before tagging a validated release or switching Voxt's production dependency: pass macOS validation in both repos, commit any fixes and the actual resolved graph, select the validated immutable fork revision/tag, update Voxt's remote package and LM pins together, apply the tested Voxt API adapter, and update its dependency audit expectations. Publishing this branch to the fork's `main` does not by itself satisfy those validation gates. Do not embed a developer's absolute package path in the shared project.

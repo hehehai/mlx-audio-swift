@@ -258,7 +258,7 @@ let audio = try await model.generate(
 
 ## Requirements
 
-For this fork's local Voxt upgrade candidate, see [VOXT_UPGRADE.md](VOXT_UPGRADE.md) for the pinned compatibility set and validation status. It has not been published or validated on macOS yet.
+For this fork's Voxt upgrade on `main`, see [VOXT_UPGRADE.md](VOXT_UPGRADE.md) for the pinned compatibility set and validation status. Promotion to `main` is not a validated release tag; macOS build and model regression results remain pending.
 
 - **macOS 14+** or **iOS 17+**
 - **Apple Silicon** (M1 or later) recommended for optimal performance
