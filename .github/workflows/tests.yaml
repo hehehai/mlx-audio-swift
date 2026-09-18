@@ -20,10 +20,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-      - name: Verify Xcode and Swift versions
+      - name: Select one Xcode toolchain for builds and MLX CPU JIT
         run: |
+          set -euo pipefail
+          # XCTest's child processes may not retain DEVELOPER_DIR. Keep the
+          # system selection consistent so /usr/bin/g++ does not launch another
+          # Xcode against the test runner's injected frameworks and SDK.
+          sudo xcode-select --switch "$DEVELOPER_DIR"
+          xcrun --kill-cache
+          SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          test -d "$SDK_PATH"
+          echo "SDKROOT=$SDK_PATH" >> "$GITHUB_ENV"
+          echo "$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin" >> "$GITHUB_PATH"
+          xcode-select --print-path
           xcodebuild -version
           xcrun swift --version
+          xcrun --sdk macosx --find clang++
       - name: Install Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
       - name: Resolve upgraded dependencies
@@ -40,4 +52,11 @@ jobs:
       - name: Build
         run: xcodebuild build-for-testing -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO
       - name: Run tests
-        run: xcodebuild test-without-building -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation -skip-testing:'MLXAudioTests/SmokeTests' -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+        run: xcodebuild test-without-building -scheme MLXAudio-Package -destination 'platform=macOS' -onlyUsePackageVersionsFromResolvedFile -skipPackagePluginValidation -skip-testing:'MLXAudioTests/SmokeTests' -parallel-testing-enabled NO -resultBundlePath "$RUNNER_TEMP/MLXAudioTests.xcresult" CODE_SIGNING_ALLOWED=NO
+      - name: Preserve test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlx-audio-test-results
+          path: ${{ runner.temp }}/MLXAudioTests.xcresult
+          if-no-files-found: warn
